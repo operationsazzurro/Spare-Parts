@@ -694,9 +694,8 @@
       Object.keys(raw).forEach(k=>{ norm[normalizeHeader(k)] = raw[k]; });
       const payload = {};
       PARTS_COLUMNS.forEach(col=>{
-        if(norm[col]!==undefined && norm[col]!==''){
-          payload[col] = normalizeImportValue(col, norm[col]);
-        }
+        const v = norm[col];
+        payload[col] = (v!==undefined && v!=='') ? normalizeImportValue(col, v) : null;
       });
       const missingRequired = REQUIRED_IMPORT_COLUMNS.filter(c=>!payload[c]);
       if(missingRequired.length){
