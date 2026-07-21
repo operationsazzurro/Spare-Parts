@@ -140,7 +140,7 @@
 <div class="pst-root" id="pst-root">
   <div class="pst-header">
     <button class="pst-gear" id="pst-gear" title="Admin panel" aria-label="Admin panel">⚙</button>
-    <p class="pst-title">Parts Desk</p>
+    <p class="pst-title">Spare Parts Desk</p>
     <p class="pst-sub">SPARE PARTS REQUEST &amp; DELIVERY TRACKER</p>
     <div class="pst-whoami" id="pst-whoami"></div>
     <div class="pst-ladder" id="pst-ladder" style="display:none;"></div>
@@ -540,7 +540,7 @@
     }
     return `
       <div style="max-width:640px; margin:10px auto 0;">
-        <p class="pst-panel-desc" style="text-align:center; margin-bottom:16px;">Choose how you're using Parts Desk.</p>
+        <p class="pst-panel-desc" style="text-align:center; margin-bottom:16px;">Choose how you're using Spare Parts Desk.</p>
         <div class="pst-role-grid">
           <button class="pst-role-card" data-action="guest">
             <span class="pst-role-icon">👁</span>
@@ -632,7 +632,7 @@
         <p class="pst-panel-title">Manage Users &amp; Privileges</p>
         <p class="pst-panel-desc">Everyone who has signed up shows up here. Assign each person a role — new sign-ups start as "Pending" (Guest-level access) until you do. The "Legacy Admin" column reflects your existing <span class="pst-mono">is_admin</span> flag — anyone with it set also gets full admin access here automatically, even without a role assigned.</p>
         <table class="pst-userlist">
-          <thead><tr><th>Name</th><th>Email</th><th>Legacy Admin</th><th>Role</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Legacy Admin</th><th>Role</th><th></th><th></th></tr></thead>
           <tbody id="adm-user-rows">
             ${users.map(u=>`
               <tr data-id="${u.id}">
@@ -644,9 +644,11 @@
                   ${['technician','approver','admin'].map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('')}
                 </select></td>
                 <td><button class="pst-btn pst-btn-ghost au-save" style="padding:6px 12px; font-size:12px;">Save</button></td>
+                <td><button class="pst-icon-btn au-delete" title="Delete user" data-id="${u.id}" data-name="${esc(u.name||u.email||'this user')}">🗑</button></td>
               </tr>`).join('')}
           </tbody>
         </table>
+        <p class="pst-panel-desc" style="margin-top:10px; margin-bottom:0;">Deleting a user removes their profile and access to this app. It does not delete their underlying login account — re-inviting them will restore access with no role assigned. <b>Note:</b> your Supabase database needs DELETE policies on <span class="pst-mono">profiles</span> and <span class="pst-mono">spare_parts_requests</span> for admins, or deletes will silently fail — see setup notes.</p>
         <div id="adm-list-msg"></div>
       </div>`;
   }
@@ -660,6 +662,28 @@
           await sb('profiles?id=eq.'+id, {method:'PATCH', body:{role}});
           msg.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
         }catch(e){ msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`; }
+      });
+      const delBtn = row.querySelector('.au-delete');
+      delBtn.addEventListener('click', async ()=>{
+        const msg = document.getElementById('adm-list-msg');
+        if(session.id && id===session.id){
+          msg.innerHTML = '<div class="pst-msg pst-msg-err">You cannot delete your own account while logged in as it.</div>';
+          return;
+        }
+        const name = delBtn.dataset.name;
+        if(!confirm(`Delete user "${name}"? They will lose access immediately. This cannot be undone.`)) return;
+        delBtn.disabled = true;
+        try{
+          const result = await sb('profiles?id=eq.'+id, {method:'DELETE'});
+          if(!result || result.length===0){
+            throw new Error('Nothing was deleted. Your database\'s Row Level Security likely doesn\'t allow admins to delete profiles yet — run the DELETE policy SQL noted below the table.');
+          }
+          row.remove();
+          msg.innerHTML = '<div class="pst-msg pst-msg-ok">User deleted.</div>';
+        }catch(e){
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+          delBtn.disabled = false;
+        }
       });
     });
   }
@@ -687,7 +711,7 @@
         <table class="pst-table">
           <thead><tr>
             <th>Sl. No.</th><th>Date</th><th>Site/Project</th><th>Machine</th><th>Parts</th><th>Qty</th>
-            <th>Priority</th><th>Requested By</th><th>Approval</th><th>Delivery</th><th>DO No.</th><th>Delivery Date</th><th>Received By</th><th>Installation</th><th>Name Plate</th><th>History Card</th>
+            <th>Priority</th><th>Requested By</th><th>Approval</th><th>Delivery</th><th>DO No.</th><th>Delivery Date</th><th>Received By</th><th>Installation</th><th>Name Plate</th><th>History Card</th>${session.role==='admin' ? '<th></th>' : ''}
           </tr></thead>
           <tbody id="ov-tbody"></tbody>
         </table>
@@ -695,9 +719,9 @@
       </div>`;
   }
   function ovRows(list){
-    if(!list.length) return `<tr><td colspan="16" class="pst-empty">No matching requests.</td></tr>`;
+    if(!list.length) return `<tr><td colspan="17" class="pst-empty">No matching requests.</td></tr>`;
     return list.map(r=>`
-      <tr>
+      <tr data-id="${r.id}">
         <td class="pst-mono">${reqSerial(r)}</td>
         <td>${fmtDate(r.request_date)}</td>
         <td>${esc(r.site_project)}</td>
@@ -714,6 +738,7 @@
         <td>${installPill(r.installation_status)}</td>
         <td>${photoThumb(r.nameplate_photo_url)}</td>
         <td>${photoThumb(r.history_card_photo_url)}</td>
+        ${session.role==='admin' ? `<td><button class="pst-icon-btn ov-delete" title="Delete record" data-id="${r.id}">🗑</button></td>` : ''}
       </tr>`).join('');
   }
   function photoThumb(url){
@@ -738,6 +763,30 @@
       });
       tbody.innerHTML = ovRows(list);
       countEl.textContent = list.length + ' of ' + requests.length + ' requests';
+      if(session.role==='admin'){
+        tbody.querySelectorAll('.ov-delete').forEach(btn=>{
+          btn.addEventListener('click', async (e)=>{
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const r = requests.find(x=>x.id===id);
+            const label = r ? `${r.parts} (${reqSerial(r)})` : 'this record';
+            if(!confirm(`Delete request for "${label}"? This cannot be undone.`)) return;
+            btn.disabled = true;
+            try{
+              const result = await sb(PARTS_TABLE+'?id=eq.'+id, {method:'DELETE'});
+              if(!result || result.length===0){
+                throw new Error('Nothing was deleted. Your database permissions (Row Level Security) likely don\'t allow admins to delete records yet — see the delete policy note in Manage Users / ask whoever set up Supabase to run the DELETE policy SQL.');
+              }
+              requests = requests.filter(x=>x.id!==id);
+              renderLadder();
+              apply();
+            }catch(err){
+              alert('Could not delete: '+err.message);
+              btn.disabled = false;
+            }
+          });
+        });
+      }
     }
     ['ov-search','ov-approval','ov-delivery'].forEach(id=>{
       document.getElementById(id).addEventListener('input', apply);
@@ -784,16 +833,35 @@
           <div class="pst-field"><label>Parts</label><input type="text" id="rq-parts" placeholder="e.g. Oil filter"></div>
           <div class="pst-field"><label>Quantity</label><input type="number" id="rq-qty" min="1" value="1"></div>
           <div class="pst-field full"><label>Reason for Replacement</label><textarea id="rq-reason" placeholder="What happened / why it's needed"></textarea></div>
-          <div class="pst-field"><label>Machine Name Plate Photo</label><input type="file" id="rq-photo-nameplate" accept="image/*" capture="environment"></div>
-          <div class="pst-field"><label>History Card Photo</label><input type="file" id="rq-photo-history" accept="image/*" capture="environment"></div>
+          <div class="pst-field"><label>Machine Name Plate Photo</label><input type="file" id="rq-photo-nameplate" accept="image/*"></div>
+          <div class="pst-field"><label>History Card Photo</label><input type="file" id="rq-photo-history" accept="image/*"></div>
         </div>
         <div class="pst-btn-row">
           <button class="pst-btn pst-btn-primary" id="rq-submit">Submit Request</button>
+          <button class="pst-btn pst-btn-ghost" id="rq-clear" type="button">Clear Form</button>
         </div>
         <div id="rq-msg"></div>
       </div>`;
   }
   function wireRequest(){
+    document.getElementById('rq-clear').addEventListener('click', ()=>{
+      const msg = document.getElementById('rq-msg');
+      if(!confirm('Clear all fields in this form?')) return;
+      document.getElementById('rq-date').value = new Date().toISOString().slice(0,10);
+      document.getElementById('rq-name').value = '';
+      document.getElementById('rq-site').value = '';
+      document.getElementById('rq-machine').value = '';
+      document.getElementById('rq-make').value = '';
+      document.getElementById('rq-model').value = '';
+      document.getElementById('rq-serial').value = '';
+      document.getElementById('rq-priority').value = 'Medium';
+      document.getElementById('rq-parts').value = '';
+      document.getElementById('rq-qty').value = '1';
+      document.getElementById('rq-reason').value = '';
+      document.getElementById('rq-photo-nameplate').value = '';
+      document.getElementById('rq-photo-history').value = '';
+      msg.innerHTML = '';
+    });
     document.getElementById('rq-submit').addEventListener('click', async ()=>{
       const msg = document.getElementById('rq-msg');
       const submitBtn = document.getElementById('rq-submit');
