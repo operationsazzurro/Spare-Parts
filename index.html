@@ -424,6 +424,24 @@
     return `${config.url}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
   }
 
+  // ---------- admin: delete user account (via Edge Function) ----------
+  async function deleteUserAccount(userId){
+    const res = await fetch(config.url + '/functions/v1/delete-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': config.key,
+        'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key)
+      },
+      body: JSON.stringify({user_id: userId})
+    });
+    const data = await res.json().catch(()=> ({}));
+    if(!res.ok){
+      throw new Error(data.error || ('Delete failed ('+res.status+')'));
+    }
+    return data;
+  }
+
   // ---------- helpers ----------
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function fmtDate(d){ if(!d) return '—'; return d; }
@@ -648,7 +666,7 @@
               </tr>`).join('')}
           </tbody>
         </table>
-        <p class="pst-panel-desc" style="margin-top:10px; margin-bottom:0;">Deleting a user removes their profile and access to this app. It does not delete their underlying login account — re-inviting them will restore access with no role assigned. <b>Note:</b> your Supabase database needs DELETE policies on <span class="pst-mono">profiles</span> and <span class="pst-mono">spare_parts_requests</span> for admins, or deletes will silently fail — see setup notes.</p>
+        <p class="pst-panel-desc" style="margin-top:10px; margin-bottom:0;">Deleting a user permanently removes their login account and profile — they'll need to sign up again from scratch to regain access. This requires the <span class="pst-mono">delete-user</span> Edge Function to be deployed on your Supabase project (see setup notes).</p>
         <div id="adm-list-msg"></div>
       </div>`;
   }
@@ -674,12 +692,9 @@
         if(!confirm(`Delete user "${name}"? They will lose access immediately. This cannot be undone.`)) return;
         delBtn.disabled = true;
         try{
-          const result = await sb('profiles?id=eq.'+id, {method:'DELETE'});
-          if(!result || result.length===0){
-            throw new Error('Nothing was deleted. Your database\'s Row Level Security likely doesn\'t allow admins to delete profiles yet — run the DELETE policy SQL noted below the table.');
-          }
+          await deleteUserAccount(id);
           row.remove();
-          msg.innerHTML = '<div class="pst-msg pst-msg-ok">User deleted.</div>';
+          msg.innerHTML = '<div class="pst-msg pst-msg-ok">User account deleted.</div>';
         }catch(e){
           msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
           delBtn.disabled = false;
