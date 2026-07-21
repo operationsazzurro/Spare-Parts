@@ -643,9 +643,109 @@
   }
 
   // ---------- ADMIN PANEL ----------
+  const PARTS_COLUMNS = ['request_date','site_project','machine','make','model','machine_serial','parts','quantity','priority','reason','requested_by','approval_status','approved_by','delivery_status','do_no','delivery_date','received_person','installation_status','remarks','nameplate_photo_url','history_card_photo_url'];
+  const REQUIRED_IMPORT_COLUMNS = ['site_project','parts'];
+
+  let xlsxLoadPromise = null;
+  function loadXLSX(){
+    if(window.XLSX) return Promise.resolve(window.XLSX);
+    if(xlsxLoadPromise) return xlsxLoadPromise;
+    xlsxLoadPromise = new Promise((resolve, reject)=>{
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.onload = ()=> resolve(window.XLSX);
+      s.onerror = ()=> reject(new Error('Could not load the Excel library. Check your internet connection and try again.'));
+      document.head.appendChild(s);
+    });
+    return xlsxLoadPromise;
+  }
+
+  function downloadImportTemplate(){
+    loadXLSX().then(XLSX=>{
+      const example = ['2026-07-01','Site A – Block 3','Air Compressor','Atlas Copco','GA37','SN-12345','Oil filter',2,'Medium','Routine replacement','Jane Doe','Pending','','Pending','','','','Pending','','',''];
+      const ws = XLSX.utils.aoa_to_sheet([PARTS_COLUMNS, example]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Spare Parts Import');
+      XLSX.writeFile(wb, 'spare_parts_import_template.xlsx');
+    }).catch(e=>{ alert(e.message); });
+  }
+
+  function normalizeHeader(h){
+    return String(h||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  }
+  function normalizeImportValue(col, val){
+    if(val==null) return '';
+    if(val instanceof Date){
+      const y=val.getFullYear(), m=String(val.getMonth()+1).padStart(2,'0'), d=String(val.getDate()).padStart(2,'0');
+      return `${y}-${m}-${d}`;
+    }
+    return String(val).trim();
+  }
+  async function parseImportFile(file){
+    const XLSX = await loadXLSX();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:true});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rawRows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    const rows = [];
+    const skipped = [];
+    rawRows.forEach((raw, idx)=>{
+      const norm = {};
+      Object.keys(raw).forEach(k=>{ norm[normalizeHeader(k)] = raw[k]; });
+      const payload = {};
+      PARTS_COLUMNS.forEach(col=>{
+        if(norm[col]!==undefined && norm[col]!==''){
+          payload[col] = normalizeImportValue(col, norm[col]);
+        }
+      });
+      const missingRequired = REQUIRED_IMPORT_COLUMNS.filter(c=>!payload[c]);
+      if(missingRequired.length){
+        if(Object.keys(payload).length) skipped.push({row: idx+2, reason: 'Missing '+missingRequired.join(', ')});
+        return; // blank / incomplete row, skip silently-ish
+      }
+      payload.quantity = parseInt(payload.quantity)||1;
+      payload.approval_status = payload.approval_status || 'Pending';
+      payload.delivery_status = payload.delivery_status || 'Pending';
+      payload.installation_status = payload.installation_status || 'Pending';
+      rows.push(payload);
+    });
+    return {rows, skipped};
+  }
+  async function importRows(rows, onProgress){
+    const CHUNK = 200;
+    let imported = 0;
+    const errors = [];
+    for(let i=0; i<rows.length; i+=CHUNK){
+      const chunk = rows.slice(i, i+CHUNK);
+      try{
+        await sb(PARTS_TABLE, {method:'POST', body:chunk});
+        imported += chunk.length;
+      }catch(e){
+        errors.push(`Rows ${i+1}–${i+chunk.length}: ${e.message}`);
+      }
+      onProgress && onProgress(Math.min(i+CHUNK, rows.length), rows.length);
+    }
+    return {imported, errors};
+  }
+
   async function adminPanelView(){
     const users = await sb('profiles?select=*&order=role.asc.nullsfirst,name.asc') || [];
     return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Bulk Import from Excel</p>
+        <p class="pst-panel-desc">Upload an .xlsx/.xls/.csv file of existing spare part records. Column headers must match the database field names — download the template below to get the exact headers. Extra columns are ignored; each row needs at least <span class="pst-mono">site_project</span> and <span class="pst-mono">parts</span> filled in.</p>
+        <div class="pst-btn-row" style="margin-top:0;">
+          <button class="pst-btn pst-btn-ghost" id="imp-template">Download Template</button>
+        </div>
+        <div class="pst-field full" style="margin-top:14px;">
+          <label>Excel / CSV File</label>
+          <input type="file" id="imp-file" accept=".xlsx,.xls,.csv">
+        </div>
+        <div class="pst-btn-row">
+          <button class="pst-btn pst-btn-primary" id="imp-go">Import Rows</button>
+        </div>
+        <div id="imp-msg"></div>
+      </div>
       <div class="pst-panel">
         <p class="pst-panel-title">Manage Users &amp; Privileges</p>
         <p class="pst-panel-desc">Everyone who has signed up shows up here. Assign each person a role — new sign-ups start as "Pending" (Guest-level access) until you do. The "Legacy Admin" column reflects your existing <span class="pst-mono">is_admin</span> flag — anyone with it set also gets full admin access here automatically, even without a role assigned.</p>
@@ -671,6 +771,39 @@
       </div>`;
   }
   function wireAdminPanel(){
+    document.getElementById('imp-template').addEventListener('click', downloadImportTemplate);
+    document.getElementById('imp-go').addEventListener('click', async ()=>{
+      const msg = document.getElementById('imp-msg');
+      const fileInput = document.getElementById('imp-file');
+      const btn = document.getElementById('imp-go');
+      const file = fileInput.files[0];
+      if(!file){ msg.innerHTML = '<div class="pst-msg pst-msg-err">Choose a file first.</div>'; return; }
+      btn.disabled = true;
+      msg.innerHTML = '<div class="pst-msg pst-msg-ok">Reading file…</div>';
+      try{
+        const {rows, skipped} = await parseImportFile(file);
+        if(!rows.length){
+          msg.innerHTML = '<div class="pst-msg pst-msg-err">No valid rows found. Make sure column headers match the template and each row has at least Site/Project and Parts filled in.</div>';
+          btn.disabled = false;
+          return;
+        }
+        msg.innerHTML = `<div class="pst-msg pst-msg-ok">Importing 0 of ${rows.length}…</div>`;
+        const {imported, errors} = await importRows(rows, (done, total)=>{
+          msg.innerHTML = `<div class="pst-msg pst-msg-ok">Importing ${done} of ${total}…</div>`;
+        });
+        let summary = `<div class="pst-msg ${errors.length?'pst-msg-err':'pst-msg-ok'}">Imported ${imported} of ${rows.length} row(s).`;
+        if(skipped.length) summary += ` ${skipped.length} row(s) skipped (missing required fields).`;
+        if(errors.length) summary += `<br>${errors.map(esc).join('<br>')}`;
+        summary += '</div>';
+        msg.innerHTML = summary;
+        fileInput.value = '';
+        if(imported>0){ await loadRequests(); renderLadder(); }
+      }catch(e){
+        msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+      }finally{
+        btn.disabled = false;
+      }
+    });
     document.querySelectorAll('#adm-user-rows tr').forEach(row=>{
       const id = row.dataset.id;
       row.querySelector('.au-save').addEventListener('click', async ()=>{
