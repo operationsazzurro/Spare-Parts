@@ -164,6 +164,7 @@
   let loading = false;
   let session = null; // { role: 'guest'|'technician'|'approver'|'admin'|null, name, id, email }
   let authTokens = null; // { access_token, refresh_token } for the logged-in real user
+  let pendingOpenRecordId = null; // set when navigating from Overview -> Store Update for a specific record
 
   const TAB_ACCESS = {
     guest:       [['overview','Overview']],
@@ -910,6 +911,14 @@
       });
       tbody.innerHTML = ovRows(list);
       countEl.textContent = list.length + ' of ' + requests.length + ' requests';
+      tbody.querySelectorAll('tr[data-id]').forEach(row=>{
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', ()=>{
+          const id = row.dataset.id;
+          const r = requests.find(x=>x.id===id);
+          if(r) openInStoreUpdate(r);
+        });
+      });
       if(session.role==='admin'){
         tbody.querySelectorAll('.ov-delete').forEach(btn=>{
           btn.addEventListener('click', async (e)=>{
@@ -941,6 +950,21 @@
     });
     document.getElementById('ov-export').addEventListener('click', exportCSV);
     apply();
+  }
+  function openInStoreUpdate(r){
+    const tabs = TAB_ACCESS[session.role] || [];
+    if(!tabs.find(t=>t[0]==='store')){
+      alert('Store Update isn\'t available for your role.');
+      return;
+    }
+    if(r.approval_status !== 'Approved'){
+      alert('This request hasn\'t been approved yet, so it doesn\'t appear in Store Update.');
+      return;
+    }
+    pendingOpenRecordId = r.id;
+    currentTab = 'store';
+    renderTabsBar();
+    render();
   }
   function exportCSV(){
     const cols = ['id','request_date','site_project','machine','make','model','machine_serial','parts','quantity','priority','reason','requested_by','approval_status','approved_by','delivery_status','do_no','delivery_date','received_person','installation_status','remarks','nameplate_photo_url','history_card_photo_url'];
@@ -1135,11 +1159,14 @@
 
   // ---------- STORE UPDATE ----------
   async function storeView(){
-    const approved = requests.filter(r=>r.approval_status==='Approved');
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Store Team — Delivery &amp; Installation</p>
         <p class="pst-panel-desc">Update status once parts are ordered, delivered, received or installed.</p>
+        <div class="pst-toolbar">
+          <input type="text" id="st-search" placeholder="Search site, part, machine, requester…">
+          <span class="pst-count" id="st-count"></span>
+        </div>
         <div id="st-list"></div>
       </div>`;
   }
@@ -1181,13 +1208,32 @@
       </div>`;
   }
   function wireStore(){
-    const approved = requests.filter(r=>r.approval_status==='Approved');
-    const list = document.getElementById('st-list');
-    if(!approved.length){
-      list.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">Nothing to fulfil yet</div>Approved requests will appear here.</div>`;
-      return;
+    const listEl = document.getElementById('st-list');
+    const countEl = document.getElementById('st-count');
+    const searchEl = document.getElementById('st-search');
+    function apply(){
+      const q = (searchEl.value||'').toLowerCase();
+      let approved = requests.filter(r=>r.approval_status==='Approved');
+      if(q){
+        approved = approved.filter(r=>{
+          const hay = [r.site_project,r.parts,r.machine,r.requested_by,r.make,r.model].join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+      }
+      if(!approved.length){
+        listEl.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">Nothing to fulfil yet</div>${q ? 'No approved requests match your search.' : 'Approved requests will appear here.'}</div>`;
+        countEl.textContent = '';
+        return;
+      }
+      listEl.innerHTML = approved.map(storeCard).join('');
+      countEl.textContent = approved.length + ' of ' + requests.filter(r=>r.approval_status==='Approved').length + ' requests';
+      wireStoreCards();
     }
-    list.innerHTML = approved.map(storeCard).join('');
+    searchEl.addEventListener('input', apply);
+    apply();
+  }
+  function wireStoreCards(){
+    const list = document.getElementById('st-list');
     list.querySelectorAll('.pst-card').forEach(card=>{
       const id = card.dataset.id;
       const msgEl = card.querySelector('.st-msg');
@@ -1217,6 +1263,15 @@
         }
       });
     });
+    if(pendingOpenRecordId){
+      const card = list.querySelector(`.pst-card[data-id="${pendingOpenRecordId}"]`);
+      if(card){
+        card.querySelector('.st-details').style.display = 'block';
+        card.querySelector('.st-caret').style.transform = 'rotate(90deg)';
+        card.scrollIntoView({behavior:'smooth', block:'start'});
+      }
+      pendingOpenRecordId = null;
+    }
   }
 
   // ---------- init ----------
