@@ -1,0 +1,1021 @@
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#eef0f1; --panel:#ffffff; --ink:#1b2a38; --ink-soft:#5a6b78;
+    --line:#d9dee1; --accent:#2e6f8e; --accent-soft:#e3eef3;
+    --amber:#c4531d; --amber-soft:#fbebe0;
+    --green:#3f7d58; --green-soft:#e7f1ea;
+    --red:#b23a3a; --red-soft:#f8e9e9;
+    --gold:#a8791a; --gold-soft:#f6efdd;
+    --gray-soft:#eceeef;
+    --radius:6px;
+  }
+  *{box-sizing:border-box;}
+  .pst-root{font-family:'Inter',sans-serif; color:var(--ink); background:var(--bg); padding:0; min-height:100%; font-size:14px;}
+  .pst-header{background:var(--ink); color:#fff; padding:22px 24px 18px; position:relative;}
+  .pst-gear{position:absolute; top:16px; right:18px; width:36px; height:36px; border-radius:50%; border:1px solid #445a6b; background:#243444; color:#a9bccb; font-size:17px; cursor:pointer; transition:all .15s;}
+  .pst-gear:hover{color:#fff; border-color:var(--accent);}
+  .pst-whoami{font-family:'Inter',sans-serif; font-size:12px; color:#a9bccb; margin-top:10px; display:flex; align-items:center; gap:8px;}
+  .pst-whoami b{color:#fff;}
+  .pst-whoami button{font-family:'Inter',sans-serif; font-size:11.5px; font-weight:600; background:none; border:1px solid #445a6b; color:#a9bccb; padding:3px 9px; border-radius:12px; cursor:pointer;}
+  .pst-whoami button:hover{color:#fff; border-color:var(--accent);}
+  .pst-title{font-family:'Oswald',sans-serif; font-weight:700; font-size:26px; letter-spacing:0.5px; text-transform:uppercase; margin:0;}
+  .pst-sub{font-family:'IBM Plex Mono',monospace; font-size:12px; color:#a9bccb; margin-top:4px; letter-spacing:0.5px;}
+  .pst-ladder{display:flex; align-items:center; gap:0; margin-top:16px; max-width:640px;}
+  .pst-node{display:flex; flex-direction:column; align-items:center; flex:1; position:relative;}
+  .pst-dot{width:12px; height:12px; border-radius:50%; background:#3c4f5f; border:2px solid #5a6b78; z-index:1;}
+  .pst-node.active .pst-dot{background:var(--accent); border-color:#8fc4dc;}
+  .pst-node-label{font-family:'IBM Plex Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#8ba0b0; margin-top:6px;}
+  .pst-node-count{font-family:'Oswald',sans-serif; font-size:18px; color:#fff; margin-top:2px;}
+  .pst-line{position:absolute; top:5px; left:50%; width:100%; height:2px; background:#3c4f5f; z-index:0;}
+  .pst-node:last-child .pst-line{display:none;}
+
+  .pst-tabs{display:flex; gap:2px; background:#dde2e4; padding:4px; margin:20px 24px 0; border-radius:8px; max-width:fit-content;}
+  .pst-tab{font-family:'Inter',sans-serif; font-weight:600; font-size:13px; padding:8px 16px; border:none; background:transparent; color:var(--ink-soft); cursor:pointer; border-radius:6px; transition:all .15s;}
+  .pst-tab.active{background:var(--panel); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.08);}
+  .pst-tab:hover:not(.active){color:var(--ink);}
+
+  .pst-body{padding:20px 24px 40px;}
+  .pst-panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; margin-bottom:16px;}
+  .pst-panel-title{font-family:'Oswald',sans-serif; font-size:16px; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 4px;}
+  .pst-panel-desc{color:var(--ink-soft); font-size:12.5px; margin:0 0 16px;}
+
+  .pst-banner{background:var(--amber-soft); border:1px solid var(--amber); color:var(--amber); padding:12px 16px; border-radius:var(--radius); font-size:13px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px;}
+  .pst-banner button{font-family:'Inter',sans-serif; font-weight:600; font-size:12px; background:var(--amber); color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; white-space:nowrap;}
+
+  .pst-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .pst-field{display:flex; flex-direction:column; gap:4px;}
+  .pst-field.full{grid-column:1/-1;}
+  .pst-field label{font-size:11.5px; font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;}
+  .pst-field input, .pst-field select, .pst-field textarea{
+    font-family:'Inter',sans-serif; font-size:13.5px; padding:8px 10px; border:1px solid var(--line); border-radius:5px; background:#fcfcfc; color:var(--ink);
+  }
+  .pst-field input:focus, .pst-field select:focus, .pst-field textarea:focus{outline:2px solid var(--accent); outline-offset:0; border-color:var(--accent); background:#fff;}
+  .pst-field textarea{resize:vertical; min-height:56px; font-family:'Inter',sans-serif;}
+
+  .pst-btn{font-family:'Inter',sans-serif; font-weight:600; font-size:13px; padding:9px 18px; border:none; border-radius:5px; cursor:pointer; transition:opacity .15s;}
+  .pst-btn:hover{opacity:.88;}
+  .pst-btn:disabled{opacity:.5; cursor:not-allowed;}
+  .pst-btn-primary{background:var(--accent); color:#fff;}
+  .pst-btn-green{background:var(--green); color:#fff;}
+  .pst-btn-red{background:var(--red); color:#fff;}
+  .pst-btn-ghost{background:transparent; color:var(--accent); border:1px solid var(--accent);}
+  .pst-btn-row{display:flex; gap:8px; margin-top:14px;}
+
+  .pst-toolbar{display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; align-items:center;}
+  .pst-toolbar input, .pst-toolbar select{font-family:'Inter',sans-serif; font-size:13px; padding:7px 10px; border:1px solid var(--line); border-radius:5px; background:#fff;}
+  .pst-toolbar input[type=text]{flex:1; min-width:160px;}
+  .pst-count{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-left:auto;}
+
+  table.pst-table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  table.pst-table th{text-align:left; font-family:'Inter',sans-serif; font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); border-bottom:2px solid var(--line); padding:8px 8px; white-space:nowrap;}
+  table.pst-table td{padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top;}
+  table.pst-table tr:hover td{background:#f7f9fa;}
+  .pst-mono{font-family:'IBM Plex Mono',monospace; font-size:11.5px;}
+
+  .pill{display:inline-block; padding:3px 9px; border-radius:20px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; white-space:nowrap;}
+  .pill-amber{background:var(--amber-soft); color:var(--amber);}
+  .pill-gold{background:var(--gold-soft); color:var(--gold);}
+  .pill-green{background:var(--green-soft); color:var(--green);}
+  .pill-red{background:var(--red-soft); color:var(--red);}
+  .pill-gray{background:var(--gray-soft); color:var(--ink-soft);}
+  .pill-accent{background:var(--accent-soft); color:var(--accent);}
+
+  .pst-empty{text-align:center; padding:40px 20px; color:var(--ink-soft);}
+  .pst-empty-title{font-family:'Oswald',sans-serif; font-size:15px; text-transform:uppercase; color:var(--ink); margin-bottom:4px;}
+
+  .pst-card{border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; margin-bottom:10px; background:#fff;}
+  .pst-card-top{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:8px;}
+  .pst-card-title{font-weight:700; font-size:14px;}
+  .pst-card-meta{font-size:11.5px; color:var(--ink-soft); margin-top:2px;}
+  .pst-card-detail{font-size:12.5px; color:var(--ink-soft); line-height:1.6; margin-bottom:10px;}
+  .pst-card-detail b{color:var(--ink); font-weight:600;}
+
+  .pst-code{font-family:'IBM Plex Mono',monospace; font-size:11.5px; background:#1b2a38; color:#cfe3ee; padding:14px; border-radius:6px; white-space:pre-wrap; line-height:1.6; overflow-x:auto;}
+  .pst-msg{font-size:12.5px; padding:8px 12px; border-radius:5px; margin-top:10px;}
+  .pst-msg-ok{background:var(--green-soft); color:var(--green);}
+  .pst-msg-err{background:var(--red-soft); color:var(--red);}
+
+  .pst-role-grid{display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; margin-top:6px;}
+  .pst-role-card{border:1px solid var(--line); border-radius:10px; padding:20px 16px; background:#fff; cursor:pointer; text-align:left; transition:all .15s; font-family:'Inter',sans-serif;}
+  .pst-role-card:hover{border-color:var(--accent); box-shadow:0 2px 10px rgba(0,0,0,.06); transform:translateY(-1px);}
+  .pst-role-icon{font-size:24px; margin-bottom:10px; display:block;}
+  .pst-role-name{font-family:'Oswald',sans-serif; font-size:16px; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px;}
+  .pst-role-desc{font-size:12px; color:var(--ink-soft); line-height:1.5;}
+
+  .pst-userlist{width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;}
+  .pst-userlist th{text-align:left; font-size:10.5px; text-transform:uppercase; color:var(--ink-soft); border-bottom:2px solid var(--line); padding:6px 8px;}
+  .pst-userlist td{padding:7px 8px; border-bottom:1px solid var(--line);}
+  .pst-userlist input, .pst-userlist select{font-family:'Inter',sans-serif; font-size:12.5px; padding:5px 7px; border:1px solid var(--line); border-radius:4px; width:100%;}
+  .pst-icon-btn{background:none; border:none; cursor:pointer; font-size:14px; padding:4px 6px; color:var(--ink-soft);}
+  .pst-icon-btn:hover{color:var(--red);}
+
+  @media (max-width: 640px){
+    .pst-role-grid{grid-template-columns:1fr;}
+  }
+
+  @media (max-width: 640px){
+    .pst-grid{grid-template-columns:1fr;}
+    .pst-header{padding:16px 14px;}
+    .pst-title{font-size:22px;}
+    .pst-ladder{max-width:100%;}
+    .pst-node-label{font-size:8.5px;}
+    .pst-node-count{font-size:15px;}
+    .pst-tabs{margin:14px 14px 0; overflow-x:auto; max-width:calc(100% - 28px); -webkit-overflow-scrolling:touch;}
+    .pst-tab{padding:10px 14px; font-size:12.5px; flex-shrink:0;}
+    .pst-body{padding:14px;}
+    .pst-panel{padding:14px;}
+    table.pst-table{display:block; overflow-x:auto;}
+    .pst-toolbar{flex-direction:column; align-items:stretch;}
+    .pst-toolbar input, .pst-toolbar select, .pst-toolbar button{width:100%;}
+    .pst-count{margin-left:0; text-align:right;}
+    .pst-field input, .pst-field select, .pst-field textarea{font-size:16px; padding:10px;}
+    .pst-btn{padding:11px 18px; width:100%;}
+    .pst-btn-row{flex-direction:column;}
+    .pst-card-top{flex-direction:column;}
+  }
+</style>
+
+<div class="pst-root" id="pst-root">
+  <div class="pst-header">
+    <button class="pst-gear" id="pst-gear" title="Admin panel" aria-label="Admin panel">⚙</button>
+    <p class="pst-title">Parts Desk</p>
+    <p class="pst-sub">SPARE PARTS REQUEST &amp; DELIVERY TRACKER</p>
+    <div class="pst-whoami" id="pst-whoami"></div>
+    <div class="pst-ladder" id="pst-ladder" style="display:none;"></div>
+  </div>
+
+  <div class="pst-tabs" id="pst-tabs"></div>
+
+  <div class="pst-body" id="pst-body"></div>
+</div>
+
+<script>
+(function(){
+  const PARTS_TABLE = "spare_parts_requests";
+  const DEFAULT_CONFIG = {
+    url: "https://hktyjebgxtblmyshinmp.supabase.co",
+    key: "sb_publishable_TgY-U8AsTvbHFEtkwU9C9Q_zi9ZAieW"
+  };
+  let config = null;
+  let requests = [];
+  let currentTab = "overview";
+  let loading = false;
+  let session = null; // { role: 'guest'|'technician'|'approver'|'admin'|null, name, id, email }
+  let authTokens = null; // { access_token, refresh_token } for the logged-in real user
+
+  const TAB_ACCESS = {
+    guest:       [['overview','Overview']],
+    unassigned:  [['overview','Overview']],
+    technician:  [['overview','Overview'],['request','New Request'],['store','Store Update']],
+    approver:    [['overview','Overview'],['approve','Approvals']],
+    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users']]
+  };
+  const ROLE_LABEL = {guest:'Guest', unassigned:'Pending', technician:'Technician', approver:'Approver', admin:'Admin'};
+
+  const root = document.getElementById('pst-root');
+  const body = document.getElementById('pst-body');
+  const ladderEl = document.getElementById('pst-ladder');
+  const tabsEl = document.getElementById('pst-tabs');
+  const whoamiEl = document.getElementById('pst-whoami');
+  const gearBtn = document.getElementById('pst-gear');
+
+  function renderTabsBar(){
+    if(!session){ tabsEl.innerHTML=''; tabsEl.style.display='none'; return; }
+    tabsEl.style.display='flex';
+    const tabs = TAB_ACCESS[session.role] || [];
+    if(!tabs.find(t=>t[0]===currentTab)) currentTab = tabs[0][0];
+    tabsEl.innerHTML = tabs.map(([key,label])=>
+      `<button class="pst-tab ${key===currentTab?'active':''}" data-tab="${key}">${label}</button>`
+    ).join('');
+    tabsEl.querySelectorAll('.pst-tab').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        currentTab = btn.dataset.tab;
+        renderTabsBar();
+        render();
+      });
+    });
+  }
+  function renderWhoami(){
+    if(!session){ whoamiEl.innerHTML=''; ladderEl.style.display='none'; return; }
+    whoamiEl.innerHTML = `Logged in as <b>${esc(session.name)}</b> · ${ROLE_LABEL[session.role]} <button id="pst-logout">Switch user</button>`;
+    ladderEl.style.display='flex';
+    document.getElementById('pst-logout').addEventListener('click', logout);
+  }
+  function logout(){
+    signOutAuth();
+    session = null;
+    currentTab = 'overview';
+    renderWhoami();
+    renderTabsBar();
+    render();
+  }
+  gearBtn.addEventListener('click', ()=>{
+    if(session && session.role==='admin'){
+      currentTab = 'admin';
+      renderTabsBar();
+      render();
+    }else{
+      alert('Only admins can manage users. Log in with an admin account first.');
+    }
+  });
+
+  // ---------- storage / config ----------
+  // Uses Claude's window.storage when available (shared across everyone using
+  // the app inside Claude.ai). Falls back to the browser's localStorage when
+  // the file is opened directly (e.g. double-clicked, or hosted elsewhere) —
+  // in that case the saved connection is per-browser, not shared automatically.
+  const hasCloudStorage = (typeof window!=='undefined' && !!window.storage);
+
+  async function loadConfig(){
+    try{
+      if(hasCloudStorage){
+        const r = await window.storage.get('supabase-config', true);
+        config = r ? JSON.parse(r.value) : null;
+      }else{
+        const raw = localStorage.getItem('pst-supabase-config');
+        config = raw ? JSON.parse(raw) : null;
+      }
+    }catch(e){ config = null; }
+    if(!config && DEFAULT_CONFIG.url && DEFAULT_CONFIG.key){
+      config = DEFAULT_CONFIG;
+    }
+  }
+  async function saveConfig(url, key){
+    url = url.trim().replace(/\/+$/,'');
+    key = key.trim();
+    config = {url,key};
+    if(hasCloudStorage){
+      await window.storage.set('supabase-config', JSON.stringify(config), true);
+    }else{
+      localStorage.setItem('pst-supabase-config', JSON.stringify(config));
+    }
+  }
+  async function getName(role){
+    try{
+      if(hasCloudStorage){
+        const r = await window.storage.get('pst-name-'+role, false);
+        return r ? r.value : '';
+      }else{
+        return localStorage.getItem('pst-name-'+role) || '';
+      }
+    }catch(e){ return ''; }
+  }
+  async function saveName(role, val){
+    try{
+      if(hasCloudStorage){
+        await window.storage.set('pst-name-'+role, val, false);
+      }else{
+        localStorage.setItem('pst-name-'+role, val);
+      }
+    }catch(e){}
+  }
+
+  // ---------- auth session persistence (per-device, personal — never shared) ----------
+  async function saveAuthSession(tokens){
+    const raw = JSON.stringify(tokens);
+    try{
+      if(hasCloudStorage) await window.storage.set('pst-auth', raw, false);
+      else localStorage.setItem('pst-auth', raw);
+    }catch(e){}
+  }
+  async function loadAuthSession(){
+    try{
+      if(hasCloudStorage){
+        const r = await window.storage.get('pst-auth', false);
+        return r ? JSON.parse(r.value) : null;
+      }else{
+        const raw = localStorage.getItem('pst-auth');
+        return raw ? JSON.parse(raw) : null;
+      }
+    }catch(e){ return null; }
+  }
+  async function clearAuthSession(){
+    try{
+      if(hasCloudStorage) await window.storage.delete('pst-auth', false);
+      else localStorage.removeItem('pst-auth');
+    }catch(e){}
+  }
+
+  // ---------- supabase REST helper ----------
+  async function sb(path, options={}){
+    if(!config) throw new Error('not_configured');
+    const url = config.url + '/rest/v1/' + path;
+    const headers = Object.assign({
+      'apikey': config.key,
+      'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key),
+      'Content-Type': 'application/json',
+      'Prefer': options.prefer || 'return=representation'
+    }, options.headers||{});
+    const res = await fetch(url, {method:options.method||'GET', headers, body: options.body?JSON.stringify(options.body):undefined});
+    if(!res.ok){
+      const txt = await res.text().catch(()=> '');
+      throw new Error('Supabase error ('+res.status+'): '+txt);
+    }
+    if(res.status===204) return null;
+    const txt = await res.text();
+    return txt ? JSON.parse(txt) : null;
+  }
+
+  // ---------- supabase auth REST helpers ----------
+  async function authRequest(path, body){
+    const res = await fetch(config.url + '/auth/v1/' + path, {
+      method: 'POST',
+      headers: {'apikey': config.key, 'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(()=> ({}));
+    if(!res.ok){
+      throw new Error(data.error_description || data.msg || data.error || 'Authentication failed');
+    }
+    return data;
+  }
+  async function signUp(email, password, name){
+    const data = await authRequest('signup', {email, password, data:{name}});
+    if(data.access_token){
+      authTokens = {access_token: data.access_token, refresh_token: data.refresh_token};
+      await saveAuthSession(authTokens);
+      // upsert so this works whether or not a DB trigger already created the profile row
+      await sb('profiles?on_conflict=id', {method:'POST', body:[{id:data.user.id, email, name}], prefer:'resolution=merge-duplicates,return=representation'});
+      return {needsConfirmation:false};
+    }
+    return {needsConfirmation:true};
+  }
+  async function signIn(email, password){
+    const data = await authRequest('token?grant_type=password', {email, password});
+    authTokens = {access_token: data.access_token, refresh_token: data.refresh_token};
+    await saveAuthSession(authTokens);
+  }
+  async function signOutAuth(){
+    if(authTokens){
+      try{
+        await fetch(config.url + '/auth/v1/logout', {
+          method:'POST',
+          headers:{'apikey':config.key, 'Authorization':'Bearer '+authTokens.access_token}
+        });
+      }catch(e){}
+    }
+    authTokens = null;
+    await clearAuthSession();
+  }
+  async function tryRestoreSession(){
+    const saved = await loadAuthSession();
+    if(!saved) return null;
+    authTokens = saved;
+    try{
+      const rows = await sb('profiles?select=*&id=eq.'+parseJwtSub(saved.access_token));
+      if(rows && rows[0]) return rows[0];
+      return null;
+    }catch(e){
+      // token likely expired — try refreshing
+      try{
+        const data = await authRequest('token?grant_type=refresh_token', {refresh_token: saved.refresh_token});
+        authTokens = {access_token: data.access_token, refresh_token: data.refresh_token};
+        await saveAuthSession(authTokens);
+        const rows = await sb('profiles?select=*&id=eq.'+parseJwtSub(authTokens.access_token));
+        return rows && rows[0] ? rows[0] : null;
+      }catch(e2){
+        authTokens = null;
+        await clearAuthSession();
+        return null;
+      }
+    }
+  }
+  function parseJwtSub(token){
+    try{
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+      return payload.sub;
+    }catch(e){ return ''; }
+  }
+
+  async function loadRequests(){
+    loading = true;
+    try{
+      requests = await sb(PARTS_TABLE+'?select=*&order=created_at.desc') || [];
+    }catch(e){
+      requests = [];
+      throw e;
+    }finally{
+      loading = false;
+    }
+  }
+
+  // ---------- photo upload (Supabase Storage) ----------
+  const PHOTO_BUCKET = "spare-parts-photos";
+  async function uploadPhoto(file, prefix){
+    if(!file) return null;
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const url = `${config.url}/storage/v1/object/${PHOTO_BUCKET}/${path}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': config.key,
+        'Authorization': 'Bearer ' + config.key,
+        'Content-Type': file.type || 'application/octet-stream'
+      },
+      body: file
+    });
+    if(!res.ok){
+      const txt = await res.text().catch(()=> '');
+      throw new Error('Photo upload failed: '+txt);
+    }
+    return `${config.url}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
+  }
+
+  // ---------- helpers ----------
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function fmtDate(d){ if(!d) return '—'; return d; }
+  function priorityPill(p){
+    if(p==='High') return '<span class="pill pill-amber">High</span>';
+    if(p==='Medium') return '<span class="pill pill-gold">Medium</span>';
+    if(p==='Low') return '<span class="pill pill-gray">Low</span>';
+    return '<span class="pill pill-gray">—</span>';
+  }
+  function approvalPill(s){
+    if(s==='Approved') return '<span class="pill pill-green">Approved</span>';
+    if(s==='Rejected') return '<span class="pill pill-red">Rejected</span>';
+    return '<span class="pill pill-gray">Pending</span>';
+  }
+  function deliveryPill(s){
+    if(s==='Delivered') return '<span class="pill pill-green">Delivered</span>';
+    if(s==='Dispatched') return '<span class="pill pill-accent">Dispatched</span>';
+    if(s==='Returned') return '<span class="pill pill-red">Returned</span>';
+    if(s==='Cancelled') return '<span class="pill pill-red">Cancelled</span>';
+    return '<span class="pill pill-gray">Pending</span>';
+  }
+  function installPill(s){
+    if(s==='Installed') return '<span class="pill pill-green">Installed</span>';
+    if(s==='Not Required') return '<span class="pill pill-gray">Not Req.</span>';
+    return '<span class="pill pill-gray">Pending</span>';
+  }
+  function reqSerial(r){
+    return 'SR-' + String(r.id).slice(0,8).toUpperCase();
+  }
+
+  function renderLadder(){
+    const total = requests.length;
+    const approved = requests.filter(r=>r.approval_status==='Approved').length;
+    const delivered = requests.filter(r=>r.delivery_status==='Delivered').length;
+    const installed = requests.filter(r=>r.installation_status==='Installed').length;
+    const stages = [
+      {label:'Requested', count: total},
+      {label:'Approved', count: approved},
+      {label:'Delivered', count: delivered},
+      {label:'Installed', count: installed}
+    ];
+    ladderEl.innerHTML = stages.map((s,i)=>`
+      <div class="pst-node ${s.count>0?'active':''}">
+        <div class="pst-line"></div>
+        <div class="pst-dot"></div>
+        <div class="pst-node-count">${s.count}</div>
+        <div class="pst-node-label">${s.label}</div>
+      </div>`).join('');
+  }
+
+  // ---------- render dispatcher ----------
+  async function render(){
+    if(!session){
+      renderWhoami();
+      renderTabsBar();
+      body.innerHTML = landingView();
+      wireLanding();
+      return;
+    }
+    renderWhoami();
+    renderTabsBar();
+    renderLadder();
+    if(!config){
+      body.innerHTML = `<div class="pst-msg pst-msg-err">No database connection configured. Contact whoever set up this app.</div>`;
+      return;
+    }
+
+    body.innerHTML = '<div class="pst-panel"><p class="pst-panel-desc">Loading requests…</p></div>';
+    try{
+      await loadRequests();
+    }catch(e){
+      body.innerHTML = `<div class="pst-msg pst-msg-err">Could not load data: ${esc(e.message)}</div>`;
+      return;
+    }
+    renderLadder();
+
+    const pendingBanner = session.role==='unassigned'
+      ? `<div class="pst-banner"><span>⏳ Your account is signed in but hasn't been assigned a role yet. You have read-only access until an admin assigns you as Technician, Approver, or Admin.</span></div>`
+      : '';
+
+    if(currentTab==='overview'){ body.innerHTML = pendingBanner + overviewView(); wireOverview(); }
+    else if(currentTab==='request'){ body.innerHTML = pendingBanner + await requestView(); wireRequest(); }
+    else if(currentTab==='approve'){ body.innerHTML = pendingBanner + await approveView(); wireApprove(); }
+    else if(currentTab==='store'){ body.innerHTML = pendingBanner + await storeView(); wireStore(); }
+    else if(currentTab==='admin'){ body.innerHTML = pendingBanner + await adminPanelView(); wireAdminPanel(); }
+  }
+
+  function emptyState(title, desc){
+    return `<div class="pst-panel"><div class="pst-empty"><div class="pst-empty-title">${esc(title)}</div><div>${esc(desc)}</div></div></div>`;
+  }
+
+  // ---------- LANDING / LOGIN ----------
+  let landingMode = null; // null | 'login' | 'signup'
+  function landingView(){
+    if(landingMode==='login' || landingMode==='signup'){
+      const isSignup = landingMode==='signup';
+      return `
+        <div class="pst-panel" style="max-width:380px; margin:20px auto 0;">
+          <p class="pst-panel-title">${isSignup ? 'Create Account' : 'Log In'}</p>
+          <p class="pst-panel-desc">${isSignup ? 'New accounts start with no role assigned — an admin will grant you access.' : 'Log in with your email and password.'}</p>
+          ${isSignup ? `<div class="pst-field full" style="margin-bottom:10px;"><label>Name</label><input type="text" id="au-signup-name" placeholder="Your full name"></div>` : ''}
+          <div class="pst-field full" style="margin-bottom:10px;"><label>Email</label><input type="email" id="au-email" placeholder="you@company.com"></div>
+          <div class="pst-field full" style="margin-bottom:6px;"><label>Password</label><input type="password" id="au-password" placeholder="••••••••"></div>
+          <div class="pst-btn-row">
+            <button class="pst-btn pst-btn-primary" id="au-go">${isSignup ? 'Create Account' : 'Log In'}</button>
+            <button class="pst-btn pst-btn-ghost" id="au-back">Back</button>
+          </div>
+          <div id="au-msg"></div>
+          <p style="font-size:12px; color:var(--ink-soft); margin-top:12px;">
+            ${isSignup ? 'Already have an account?' : "Don't have an account?"}
+            <a href="#" id="au-switch" style="color:var(--accent);">${isSignup ? 'Log in' : 'Sign up'}</a>
+          </p>
+        </div>`;
+    }
+    return `
+      <div style="max-width:640px; margin:10px auto 0;">
+        <p class="pst-panel-desc" style="text-align:center; margin-bottom:16px;">Choose how you're using Parts Desk.</p>
+        <div class="pst-role-grid">
+          <button class="pst-role-card" data-action="guest">
+            <span class="pst-role-icon">👁</span>
+            <div class="pst-role-name">Guest</div>
+            <div class="pst-role-desc">View all requests and store updates. Read-only, no account needed.</div>
+          </button>
+          <button class="pst-role-card" data-action="login">
+            <span class="pst-role-icon">🔑</span>
+            <div class="pst-role-name">Log In</div>
+            <div class="pst-role-desc">Technicians, approvers and admins with an existing account.</div>
+          </button>
+          <button class="pst-role-card" data-action="signup">
+            <span class="pst-role-icon">✍️</span>
+            <div class="pst-role-name">Sign Up</div>
+            <div class="pst-role-desc">First time here? Create an account, then ask your admin to assign your role.</div>
+          </button>
+        </div>
+      </div>`;
+  }
+  function resolveRole(p){
+    if(!p) return 'unassigned';
+    if(p.role) return p.role;
+    if(p.is_admin) return 'admin';
+    return 'unassigned';
+  }
+  async function loadSessionFromTokens(){
+    const rows = await sb('profiles?select=*&id=eq.'+parseJwtSub(authTokens.access_token));
+    const p = rows && rows[0];
+    session = {
+      role: resolveRole(p),
+      name: p ? p.name : '',
+      id: p ? p.id : null,
+      email: p ? p.email : ''
+    };
+  }
+  function wireLanding(){
+    if(landingMode==='login' || landingMode==='signup'){
+      const isSignup = landingMode==='signup';
+      document.getElementById('au-back').addEventListener('click', ()=>{ landingMode=null; render(); });
+      document.getElementById('au-switch').addEventListener('click', (e)=>{ e.preventDefault(); landingMode = isSignup?'login':'signup'; render(); });
+      document.getElementById('au-go').addEventListener('click', async ()=>{
+        const msg = document.getElementById('au-msg');
+        const email = document.getElementById('au-email').value.trim();
+        const password = document.getElementById('au-password').value;
+        if(!email || !password){ msg.innerHTML = '<div class="pst-msg pst-msg-err">Enter your email and password.</div>'; return; }
+        msg.innerHTML = '<div class="pst-msg pst-msg-ok">Working…</div>';
+        try{
+          if(isSignup){
+            const name = document.getElementById('au-signup-name').value.trim();
+            if(!name){ msg.innerHTML = '<div class="pst-msg pst-msg-err">Enter your name.</div>'; return; }
+            const result = await signUp(email, password, name);
+            if(result.needsConfirmation){
+              msg.innerHTML = '<div class="pst-msg pst-msg-ok">Account created — check your email to confirm, then log in.</div>';
+              return;
+            }
+          }else{
+            await signIn(email, password);
+          }
+          await loadSessionFromTokens();
+          landingMode = null;
+          currentTab = 'overview';
+          render();
+        }catch(e){
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+        }
+      });
+      return;
+    }
+    document.querySelectorAll('.pst-role-card').forEach(card=>{
+      card.addEventListener('click', ()=>{
+        const action = card.dataset.action;
+        if(action==='guest'){
+          session = {role:'guest', name:'Guest', id:null};
+          currentTab = 'overview';
+          render();
+        }else{
+          landingMode = action;
+          render();
+        }
+      });
+    });
+  }
+
+  // ---------- ADMIN PANEL ----------
+  async function adminPanelView(){
+    const users = await sb('profiles?select=*&order=role.asc.nullsfirst,name.asc') || [];
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Manage Users &amp; Privileges</p>
+        <p class="pst-panel-desc">Everyone who has signed up shows up here. Assign each person a role — new sign-ups start as "Pending" (Guest-level access) until you do. The "Legacy Admin" column reflects your existing <span class="pst-mono">is_admin</span> flag — anyone with it set also gets full admin access here automatically, even without a role assigned.</p>
+        <table class="pst-userlist">
+          <thead><tr><th>Name</th><th>Email</th><th>Legacy Admin</th><th>Role</th><th></th></tr></thead>
+          <tbody id="adm-user-rows">
+            ${users.map(u=>`
+              <tr data-id="${u.id}">
+                <td>${esc(u.name||'—')}</td>
+                <td style="color:var(--ink-soft); font-size:12px;">${esc(u.email||'—')}</td>
+                <td>${u.is_admin ? '<span class="pill pill-green">is_admin</span>' : '<span class="pill pill-gray">—</span>'}</td>
+                <td><select class="au-role">
+                  <option value="" ${!u.role?'selected':''}>Pending</option>
+                  ${['technician','approver','admin'].map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('')}
+                </select></td>
+                <td><button class="pst-btn pst-btn-ghost au-save" style="padding:6px 12px; font-size:12px;">Save</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        <div id="adm-list-msg"></div>
+      </div>`;
+  }
+  function wireAdminPanel(){
+    document.querySelectorAll('#adm-user-rows tr').forEach(row=>{
+      const id = row.dataset.id;
+      row.querySelector('.au-save').addEventListener('click', async ()=>{
+        const role = row.querySelector('.au-role').value || null;
+        const msg = document.getElementById('adm-list-msg');
+        try{
+          await sb('profiles?id=eq.'+id, {method:'PATCH', body:{role}});
+          msg.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
+        }catch(e){ msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`; }
+      });
+    });
+  }
+
+  // ---------- OVERVIEW ----------
+  function overviewView(){
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">All Requests</p>
+        <p class="pst-panel-desc">Full log of spare part requests across every stage.</p>
+        <div class="pst-toolbar">
+          <input type="text" id="ov-search" placeholder="Search site, part, machine, requester…">
+          <select id="ov-approval">
+            <option value="">All approval statuses</option>
+            <option>Pending</option><option>Approved</option><option>Rejected</option>
+          </select>
+          <select id="ov-delivery">
+            <option value="">All delivery statuses</option>
+            <option>Pending</option><option>Dispatched</option><option>Delivered</option><option>Returned</option><option>Cancelled</option>
+          </select>
+          <button class="pst-btn pst-btn-ghost" id="ov-export">Export CSV</button>
+          <span class="pst-count" id="ov-count"></span>
+        </div>
+        <div style="overflow-x:auto;">
+        <table class="pst-table">
+          <thead><tr>
+            <th>Sl. No.</th><th>Date</th><th>Site/Project</th><th>Machine</th><th>Parts</th><th>Qty</th>
+            <th>Priority</th><th>Requested By</th><th>Approval</th><th>Delivery</th><th>DO No.</th><th>Delivery Date</th><th>Received By</th><th>Installation</th><th>Name Plate</th><th>History Card</th>
+          </tr></thead>
+          <tbody id="ov-tbody"></tbody>
+        </table>
+        </div>
+      </div>`;
+  }
+  function ovRows(list){
+    if(!list.length) return `<tr><td colspan="16" class="pst-empty">No matching requests.</td></tr>`;
+    return list.map(r=>`
+      <tr>
+        <td class="pst-mono">${reqSerial(r)}</td>
+        <td>${fmtDate(r.request_date)}</td>
+        <td>${esc(r.site_project)}</td>
+        <td>${esc(r.machine)}<br><span style="color:var(--ink-soft); font-size:11px;">${esc(r.make||'')} ${esc(r.model||'')}</span></td>
+        <td>${esc(r.parts)}</td>
+        <td>${esc(r.quantity)}</td>
+        <td>${priorityPill(r.priority)}</td>
+        <td>${esc(r.requested_by)}</td>
+        <td>${approvalPill(r.approval_status)}</td>
+        <td>${deliveryPill(r.delivery_status)}</td>
+        <td class="pst-mono">${esc(r.do_no||'—')}</td>
+        <td>${fmtDate(r.delivery_date)||'—'}</td>
+        <td>${esc(r.received_person||'—')}</td>
+        <td>${installPill(r.installation_status)}</td>
+        <td>${photoThumb(r.nameplate_photo_url)}</td>
+        <td>${photoThumb(r.history_card_photo_url)}</td>
+      </tr>`).join('');
+  }
+  function photoThumb(url){
+    if(!url) return '<span style="color:var(--ink-soft);">—</span>';
+    return `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></a>`;
+  }
+  function wireOverview(){
+    const tbody = document.getElementById('ov-tbody');
+    const countEl = document.getElementById('ov-count');
+    function apply(){
+      const q = document.getElementById('ov-search').value.toLowerCase();
+      const ap = document.getElementById('ov-approval').value;
+      const de = document.getElementById('ov-delivery').value;
+      let list = requests.filter(r=>{
+        if(ap && r.approval_status!==ap) return false;
+        if(de && r.delivery_status!==de) return false;
+        if(q){
+          const hay = [r.site_project,r.parts,r.machine,r.requested_by,r.make,r.model].join(' ').toLowerCase();
+          if(!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      tbody.innerHTML = ovRows(list);
+      countEl.textContent = list.length + ' of ' + requests.length + ' requests';
+    }
+    ['ov-search','ov-approval','ov-delivery'].forEach(id=>{
+      document.getElementById(id).addEventListener('input', apply);
+      document.getElementById(id).addEventListener('change', apply);
+    });
+    document.getElementById('ov-export').addEventListener('click', exportCSV);
+    apply();
+  }
+  function exportCSV(){
+    const cols = ['id','request_date','site_project','machine','make','model','machine_serial','parts','quantity','priority','reason','requested_by','approval_status','approved_by','delivery_status','do_no','delivery_date','received_person','installation_status','remarks','nameplate_photo_url','history_card_photo_url'];
+    const lines = [cols.join(',')];
+    requests.forEach(r=>{
+      lines.push(cols.map(c=>{
+        let v = r[c]==null? '' : String(r[c]).replace(/"/g,'""');
+        return /[,"\n]/.test(v) ? `"${v}"` : v;
+      }).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'spare_parts_requests.csv';
+    a.click();
+  }
+
+  // ---------- NEW REQUEST (Technician) ----------
+  async function requestView(){
+    const name = session && session.name !== 'Guest' ? session.name : await getName('tech');
+    const today = new Date().toISOString().slice(0,10);
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">New Spare Part Request</p>
+        <p class="pst-panel-desc">Site technicians: fill this in when you need a part. It goes straight to the approval queue.</p>
+        <div class="pst-grid">
+          <div class="pst-field"><label>Date</label><input type="date" id="rq-date" value="${today}"></div>
+          <div class="pst-field"><label>Requested By</label><input type="text" id="rq-name" placeholder="Your name" value="${esc(name)}"></div>
+          <div class="pst-field"><label>Site / Project</label><input type="text" id="rq-site" placeholder="e.g. Site A – Block 3"></div>
+          <div class="pst-field"><label>Machine</label><input type="text" id="rq-machine" placeholder="e.g. Air Compressor"></div>
+          <div class="pst-field"><label>Make</label><input type="text" id="rq-make"></div>
+          <div class="pst-field"><label>Model</label><input type="text" id="rq-model"></div>
+          <div class="pst-field"><label>Machine Serial No.</label><input type="text" id="rq-serial"></div>
+          <div class="pst-field"><label>Priority</label>
+            <select id="rq-priority"><option>Medium</option><option>High</option><option>Low</option></select>
+          </div>
+          <div class="pst-field"><label>Parts</label><input type="text" id="rq-parts" placeholder="e.g. Oil filter"></div>
+          <div class="pst-field"><label>Quantity</label><input type="number" id="rq-qty" min="1" value="1"></div>
+          <div class="pst-field full"><label>Reason for Replacement</label><textarea id="rq-reason" placeholder="What happened / why it's needed"></textarea></div>
+          <div class="pst-field"><label>Machine Name Plate Photo</label><input type="file" id="rq-photo-nameplate" accept="image/*" capture="environment"></div>
+          <div class="pst-field"><label>History Card Photo</label><input type="file" id="rq-photo-history" accept="image/*" capture="environment"></div>
+        </div>
+        <div class="pst-btn-row">
+          <button class="pst-btn pst-btn-primary" id="rq-submit">Submit Request</button>
+        </div>
+        <div id="rq-msg"></div>
+      </div>`;
+  }
+  function wireRequest(){
+    document.getElementById('rq-submit').addEventListener('click', async ()=>{
+      const msg = document.getElementById('rq-msg');
+      const submitBtn = document.getElementById('rq-submit');
+      const site = document.getElementById('rq-site').value.trim();
+      const parts = document.getElementById('rq-parts').value.trim();
+      const name = document.getElementById('rq-name').value.trim();
+      if(!site || !parts || !name){
+        msg.innerHTML = '<div class="pst-msg pst-msg-err">Please fill in at least Site/Project, Parts and Requested By.</div>';
+        return;
+      }
+      const nameplateFile = document.getElementById('rq-photo-nameplate').files[0] || null;
+      const historyFile = document.getElementById('rq-photo-history').files[0] || null;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting…';
+      msg.innerHTML = '';
+      try{
+        let nameplateUrl = null, historyUrl = null;
+        if(nameplateFile || historyFile){
+          msg.innerHTML = '<div class="pst-msg pst-msg-ok">Uploading photos…</div>';
+          [nameplateUrl, historyUrl] = await Promise.all([
+            uploadPhoto(nameplateFile, 'nameplate'),
+            uploadPhoto(historyFile, 'history')
+          ]);
+        }
+        const payload = {
+          request_date: document.getElementById('rq-date').value,
+          site_project: site,
+          machine: document.getElementById('rq-machine').value.trim(),
+          make: document.getElementById('rq-make').value.trim(),
+          model: document.getElementById('rq-model').value.trim(),
+          machine_serial: document.getElementById('rq-serial').value.trim(),
+          parts: parts,
+          quantity: parseInt(document.getElementById('rq-qty').value)||1,
+          priority: document.getElementById('rq-priority').value,
+          reason: document.getElementById('rq-reason').value.trim(),
+          requested_by: name,
+          approval_status: 'Pending',
+          delivery_status: 'Pending',
+          installation_status: 'Pending',
+          nameplate_photo_url: nameplateUrl,
+          history_card_photo_url: historyUrl
+        };
+        await sb(PARTS_TABLE, {method:'POST', body:[payload]});
+        await saveName('tech', name);
+        msg.innerHTML = '<div class="pst-msg pst-msg-ok">Request submitted. It now shows up in the approval queue.</div>';
+        document.getElementById('rq-parts').value='';
+        document.getElementById('rq-reason').value='';
+        document.getElementById('rq-photo-nameplate').value='';
+        document.getElementById('rq-photo-history').value='';
+      }catch(e){
+        msg.innerHTML = `<div class="pst-msg pst-msg-err">Could not submit: ${esc(e.message)}</div>`;
+      }finally{
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Request';
+      }
+    });
+  }
+
+  // ---------- APPROVALS (Manager) ----------
+  async function approveView(){
+    const name = session && session.name !== 'Guest' ? session.name : await getName('mgr');
+    const pending = requests.filter(r=>r.approval_status==='Pending');
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Approval Queue</p>
+        <p class="pst-panel-desc">Approve or reject pending requests before they move to the store team.</p>
+        <p style="font-size:12.5px; color:var(--ink-soft); margin:0 0 14px;">Approving as <b style="color:var(--ink);">${esc(name)}</b></p>
+        <input type="hidden" id="ap-name" value="${esc(name)}">
+        <div id="ap-list">${pending.length? '' : ''}</div>
+      </div>`;
+  }
+  function approveCard(r){
+    return `
+      <div class="pst-card" data-id="${r.id}">
+        <div class="pst-card-top">
+          <div>
+            <div class="pst-card-title">${esc(r.parts)} × ${esc(r.quantity)}</div>
+            <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} ${esc(r.make||'')} ${esc(r.model||'')} · Req. by ${esc(r.requested_by)} · ${fmtDate(r.request_date)}</div>
+          </div>
+          ${priorityPill(r.priority)}
+        </div>
+        <div class="pst-card-detail"><b>Reason:</b> ${esc(r.reason||'—')}</div>
+        <div class="pst-btn-row">
+          <button class="pst-btn pst-btn-green ap-approve">Approve</button>
+          <button class="pst-btn pst-btn-red ap-reject">Reject</button>
+        </div>
+        <div class="ap-msg"></div>
+      </div>`;
+  }
+  function wireApprove(){
+    const pending = requests.filter(r=>r.approval_status==='Pending');
+    const list = document.getElementById('ap-list');
+    if(!pending.length){
+      list.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">Queue is clear</div>No requests waiting on approval.</div>`;
+      return;
+    }
+    list.innerHTML = pending.map(approveCard).join('');
+    list.querySelectorAll('.pst-card').forEach(card=>{
+      const id = card.dataset.id;
+      const msgEl = card.querySelector('.ap-msg');
+      async function act(status){
+        const approver = document.getElementById('ap-name').value.trim();
+        if(!approver){ msgEl.innerHTML = '<div class="pst-msg pst-msg-err">Enter your name first.</div>'; return; }
+        try{
+          await sb(PARTS_TABLE+'?id=eq.'+id, {method:'PATCH', body:{
+            approval_status: status, approved_by: approver, approval_date: new Date().toISOString().slice(0,10)
+          }});
+          await saveName('mgr', approver);
+          card.style.opacity='0.4';
+          msgEl.innerHTML = `<div class="pst-msg pst-msg-ok">Marked ${status}.</div>`;
+          setTimeout(render, 500);
+        }catch(e){
+          msgEl.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+        }
+      }
+      card.querySelector('.ap-approve').addEventListener('click', ()=>act('Approved'));
+      card.querySelector('.ap-reject').addEventListener('click', ()=>act('Rejected'));
+    });
+  }
+
+  // ---------- STORE UPDATE ----------
+  async function storeView(){
+    const approved = requests.filter(r=>r.approval_status==='Approved');
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Store Team — Delivery &amp; Installation</p>
+        <p class="pst-panel-desc">Update status once parts are ordered, delivered, received or installed.</p>
+        <div id="st-list"></div>
+      </div>`;
+  }
+  function storeCard(r){
+    return `
+      <div class="pst-card" data-id="${r.id}">
+        <div class="pst-card-top st-toggle" style="cursor:pointer;">
+          <div>
+            <div class="pst-card-title">${esc(r.parts)} × ${esc(r.quantity)} <span class="pst-mono" style="color:var(--ink-soft); font-weight:400;">${reqSerial(r)}</span></div>
+            <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} · Req. by ${esc(r.requested_by)} · Approved by ${esc(r.approved_by||'—')}</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            ${deliveryPill(r.delivery_status)}
+            <span class="st-caret" style="color:var(--ink-soft); font-size:11px; transition:transform .15s;">▸</span>
+          </div>
+        </div>
+        <div class="st-details" style="display:none; margin-top:14px;">
+          <div class="pst-grid">
+            <div class="pst-field"><label>Delivery Status</label>
+              <select class="st-delivery">
+                ${['Pending','Dispatched','Delivered','Returned','Cancelled'].map(s=>`<option ${r.delivery_status===s?'selected':''}>${s}</option>`).join('')}
+              </select>
+            </div>
+            <div class="pst-field"><label>DO No.</label><input type="text" class="st-do" value="${esc(r.do_no||'')}"></div>
+            <div class="pst-field"><label>Delivery Date</label><input type="date" class="st-date" value="${r.delivery_date||''}"></div>
+            <div class="pst-field"><label>Received Person</label><input type="text" class="st-received" value="${esc(r.received_person||'')}"></div>
+            <div class="pst-field"><label>Installation Status</label>
+              <select class="st-install">
+                ${['Pending','Installed','Not Required'].map(s=>`<option ${r.installation_status===s?'selected':''}>${s}</option>`).join('')}
+              </select>
+            </div>
+            <div class="pst-field full"><label>Remarks</label><textarea class="st-remarks">${esc(r.remarks||'')}</textarea></div>
+          </div>
+          <div class="pst-btn-row">
+            <button class="pst-btn pst-btn-primary st-save">Save Update</button>
+          </div>
+          <div class="st-msg"></div>
+        </div>
+      </div>`;
+  }
+  function wireStore(){
+    const approved = requests.filter(r=>r.approval_status==='Approved');
+    const list = document.getElementById('st-list');
+    if(!approved.length){
+      list.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">Nothing to fulfil yet</div>Approved requests will appear here.</div>`;
+      return;
+    }
+    list.innerHTML = approved.map(storeCard).join('');
+    list.querySelectorAll('.pst-card').forEach(card=>{
+      const id = card.dataset.id;
+      const msgEl = card.querySelector('.st-msg');
+      const details = card.querySelector('.st-details');
+      const caret = card.querySelector('.st-caret');
+      card.querySelector('.st-toggle').addEventListener('click', ()=>{
+        const isOpen = details.style.display !== 'none';
+        details.style.display = isOpen ? 'none' : 'block';
+        caret.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
+      });
+      card.querySelector('.st-save').addEventListener('click', async ()=>{
+        const payload = {
+          delivery_status: card.querySelector('.st-delivery').value,
+          do_no: card.querySelector('.st-do').value.trim(),
+          delivery_date: card.querySelector('.st-date').value || null,
+          received_person: card.querySelector('.st-received').value.trim(),
+          installation_status: card.querySelector('.st-install').value,
+          remarks: card.querySelector('.st-remarks').value.trim()
+        };
+        try{
+          await sb(PARTS_TABLE+'?id=eq.'+id, {method:'PATCH', body:payload});
+          msgEl.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
+          Object.assign(requests.find(r=>r.id===id), payload);
+          renderLadder();
+        }catch(e){
+          msgEl.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+        }
+      });
+    });
+  }
+
+  // ---------- init ----------
+  (async function init(){
+    await loadConfig();
+    try{
+      const restored = await tryRestoreSession();
+      if(restored){
+        session = {
+          role: resolveRole(restored),
+          name: restored.name,
+          id: restored.id,
+          email: restored.email
+        };
+      }
+    }catch(e){}
+    render();
+  })();
+})();
+</script>
