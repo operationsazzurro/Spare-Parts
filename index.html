@@ -827,8 +827,13 @@
   }
 
   // ---------- NEW REQUEST (Technician) ----------
+  function requesterIdentity(){
+    if(session && session.name && session.name.trim() && session.name!=='Guest') return session.name.trim();
+    if(session && session.email) return session.email;
+    return '';
+  }
   async function requestView(){
-    const name = session && session.name !== 'Guest' ? session.name : await getName('tech');
+    const name = requesterIdentity();
     const today = new Date().toISOString().slice(0,10);
     return `
       <div class="pst-panel">
@@ -836,7 +841,7 @@
         <p class="pst-panel-desc">Site technicians: fill this in when you need a part. It goes straight to the approval queue.</p>
         <div class="pst-grid">
           <div class="pst-field"><label>Date</label><input type="date" id="rq-date" value="${today}"></div>
-          <div class="pst-field"><label>Requested By</label><input type="text" id="rq-name" placeholder="Your name" value="${esc(name)}"></div>
+          <div class="pst-field"><label>Requested By</label><input type="text" id="rq-name" value="${esc(name)}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
           <div class="pst-field"><label>Site / Project</label><input type="text" id="rq-site" placeholder="e.g. Site A – Block 3"></div>
           <div class="pst-field"><label>Machine</label><input type="text" id="rq-machine" placeholder="e.g. Air Compressor"></div>
           <div class="pst-field"><label>Make</label><input type="text" id="rq-make"></div>
@@ -863,7 +868,6 @@
       const msg = document.getElementById('rq-msg');
       if(!confirm('Clear all fields in this form?')) return;
       document.getElementById('rq-date').value = new Date().toISOString().slice(0,10);
-      document.getElementById('rq-name').value = '';
       document.getElementById('rq-site').value = '';
       document.getElementById('rq-machine').value = '';
       document.getElementById('rq-make').value = '';
@@ -882,9 +886,9 @@
       const submitBtn = document.getElementById('rq-submit');
       const site = document.getElementById('rq-site').value.trim();
       const parts = document.getElementById('rq-parts').value.trim();
-      const name = document.getElementById('rq-name').value.trim();
+      const name = requesterIdentity();
       if(!site || !parts || !name){
-        msg.innerHTML = '<div class="pst-msg pst-msg-err">Please fill in at least Site/Project, Parts and Requested By.</div>';
+        msg.innerHTML = '<div class="pst-msg pst-msg-err">Please fill in at least Site/Project and Parts. (Requested By could not be determined — make sure your account has a name or email set.)</div>';
         return;
       }
       const nameplateFile = document.getElementById('rq-photo-nameplate').files[0] || null;
@@ -921,7 +925,6 @@
           history_card_photo_url: historyUrl
         };
         await sb(PARTS_TABLE, {method:'POST', body:[payload]});
-        await saveName('tech', name);
         msg.innerHTML = '<div class="pst-msg pst-msg-ok">Request submitted. It now shows up in the approval queue.</div>';
         document.getElementById('rq-parts').value='';
         document.getElementById('rq-reason').value='';
@@ -1030,7 +1033,7 @@
             </div>
             <div class="pst-field"><label>DO No.</label><input type="text" class="st-do" value="${esc(r.do_no||'')}"></div>
             <div class="pst-field"><label>Delivery Date</label><input type="date" class="st-date" value="${r.delivery_date||''}"></div>
-            <div class="pst-field"><label>Received Person</label><input type="text" class="st-received" value="${esc(r.received_person||'')}"></div>
+            <div class="pst-field"><label>Received Person</label><input type="text" class="st-received" value="${esc(r.received_person || requesterIdentity())}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
             <div class="pst-field"><label>Installation Status</label>
               <select class="st-install">
                 ${['Pending','Installed','Not Required'].map(s=>`<option ${r.installation_status===s?'selected':''}>${s}</option>`).join('')}
