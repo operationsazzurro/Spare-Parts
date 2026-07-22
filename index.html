@@ -452,21 +452,24 @@
     if(p==='Low') return '<span class="pill pill-gray">Low</span>';
     return '<span class="pill pill-gray">—</span>';
   }
+  function statusEq(a, b){
+    return String(a||'').trim().toLowerCase() === String(b||'').trim().toLowerCase();
+  }
   function approvalPill(s){
-    if(s==='Approved') return '<span class="pill pill-green">Approved</span>';
-    if(s==='Rejected') return '<span class="pill pill-red">Rejected</span>';
+    if(statusEq(s,'Approved')) return '<span class="pill pill-green">Approved</span>';
+    if(statusEq(s,'Rejected')) return '<span class="pill pill-red">Rejected</span>';
     return '<span class="pill pill-gray">Pending</span>';
   }
   function deliveryPill(s){
-    if(s==='Delivered') return '<span class="pill pill-green">Delivered</span>';
-    if(s==='Dispatched') return '<span class="pill pill-accent">Dispatched</span>';
-    if(s==='Returned') return '<span class="pill pill-red">Returned</span>';
-    if(s==='Cancelled') return '<span class="pill pill-red">Cancelled</span>';
+    if(statusEq(s,'Delivered')) return '<span class="pill pill-green">Delivered</span>';
+    if(statusEq(s,'Dispatched')) return '<span class="pill pill-accent">Dispatched</span>';
+    if(statusEq(s,'Returned')) return '<span class="pill pill-red">Returned</span>';
+    if(statusEq(s,'Cancelled')) return '<span class="pill pill-red">Cancelled</span>';
     return '<span class="pill pill-gray">Pending</span>';
   }
   function installPill(s){
-    if(s==='Installed') return '<span class="pill pill-green">Installed</span>';
-    if(s==='Not Required') return '<span class="pill pill-gray">Not Req.</span>';
+    if(statusEq(s,'Installed')) return '<span class="pill pill-green">Installed</span>';
+    if(statusEq(s,'Not Required')) return '<span class="pill pill-gray">Not Req.</span>';
     return '<span class="pill pill-gray">Pending</span>';
   }
   function reqSerial(r){
@@ -475,9 +478,9 @@
 
   function renderLadder(){
     const total = requests.length;
-    const approved = requests.filter(r=>r.approval_status==='Approved').length;
-    const delivered = requests.filter(r=>r.delivery_status==='Delivered').length;
-    const installed = requests.filter(r=>r.installation_status==='Installed').length;
+    const approved = requests.filter(r=>statusEq(r.approval_status,'Approved')).length;
+    const delivered = requests.filter(r=>statusEq(r.delivery_status,'Delivered')).length;
+    const installed = requests.filter(r=>statusEq(r.installation_status,'Installed')).length;
     const stages = [
       {label:'Requested', count: total},
       {label:'Approved', count: approved},
@@ -674,6 +677,12 @@
   function normalizeHeader(h){
     return String(h||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   }
+  function canonicalStatus(val, options, fallback){
+    const v = String(val||'').trim();
+    if(!v) return fallback;
+    const match = options.find(o=>o.toLowerCase()===v.toLowerCase());
+    return match || v; // unrecognized text is kept as-is rather than silently dropped
+  }
   function normalizeImportValue(col, val){
     if(val==null) return '';
     if(val instanceof Date){
@@ -704,9 +713,9 @@
         return; // blank / incomplete row, skip silently-ish
       }
       payload.quantity = parseInt(payload.quantity)||1;
-      payload.approval_status = payload.approval_status || 'Pending';
-      payload.delivery_status = payload.delivery_status || 'Pending';
-      payload.installation_status = payload.installation_status || 'Pending';
+      payload.approval_status = canonicalStatus(payload.approval_status, ['Pending','Approved','Rejected'], 'Pending');
+      payload.delivery_status = canonicalStatus(payload.delivery_status, ['Pending','Dispatched','Delivered','Returned','Cancelled'], 'Pending');
+      payload.installation_status = canonicalStatus(payload.installation_status, ['Pending','Installed','Not Required'], 'Pending');
       rows.push(payload);
     });
     return {rows, skipped};
@@ -901,8 +910,8 @@
       const ap = document.getElementById('ov-approval').value;
       const de = document.getElementById('ov-delivery').value;
       let list = requests.filter(r=>{
-        if(ap && r.approval_status!==ap) return false;
-        if(de && r.delivery_status!==de) return false;
+        if(ap && !statusEq(r.approval_status,ap)) return false;
+        if(de && !statusEq(r.delivery_status,de)) return false;
         if(q){
           const hay = [r.site_project,r.parts,r.machine,r.requested_by,r.make,r.model].join(' ').toLowerCase();
           if(!hay.includes(q)) return false;
@@ -957,7 +966,7 @@
       alert('Store Update isn\'t available for your role.');
       return;
     }
-    if(r.approval_status !== 'Approved'){
+    if(!statusEq(r.approval_status,'Approved')){
       alert('This request hasn\'t been approved yet, so it doesn\'t appear in Store Update.');
       return;
     }
@@ -1098,7 +1107,7 @@
   // ---------- APPROVALS (Manager) ----------
   async function approveView(){
     const name = session && session.name !== 'Guest' ? session.name : await getName('mgr');
-    const pending = requests.filter(r=>r.approval_status==='Pending');
+    const pending = requests.filter(r=>statusEq(r.approval_status,'Pending'));
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Approval Queue</p>
@@ -1127,7 +1136,7 @@
       </div>`;
   }
   function wireApprove(){
-    const pending = requests.filter(r=>r.approval_status==='Pending');
+    const pending = requests.filter(r=>statusEq(r.approval_status,'Pending'));
     const list = document.getElementById('ap-list');
     if(!pending.length){
       list.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">Queue is clear</div>No requests waiting on approval.</div>`;
@@ -1187,7 +1196,7 @@
           <div class="pst-grid">
             <div class="pst-field"><label>Delivery Status</label>
               <select class="st-delivery">
-                ${['Pending','Dispatched','Delivered','Returned','Cancelled'].map(s=>`<option ${r.delivery_status===s?'selected':''}>${s}</option>`).join('')}
+                ${['Pending','Dispatched','Delivered','Returned','Cancelled'].map(s=>`<option ${statusEq(r.delivery_status,s)?'selected':''}>${s}</option>`).join('')}
               </select>
             </div>
             <div class="pst-field"><label>DO No.</label><input type="text" class="st-do" value="${esc(r.do_no||'')}"></div>
@@ -1195,7 +1204,7 @@
             <div class="pst-field"><label>Received Person</label><input type="text" class="st-received" value="${esc(r.received_person || requesterIdentity())}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
             <div class="pst-field"><label>Installation Status</label>
               <select class="st-install">
-                ${['Pending','Installed','Not Required'].map(s=>`<option ${r.installation_status===s?'selected':''}>${s}</option>`).join('')}
+                ${['Pending','Installed','Not Required'].map(s=>`<option ${statusEq(r.installation_status,s)?'selected':''}>${s}</option>`).join('')}
               </select>
             </div>
             <div class="pst-field full"><label>Remarks</label><textarea class="st-remarks">${esc(r.remarks||'')}</textarea></div>
@@ -1213,7 +1222,7 @@
     const searchEl = document.getElementById('st-search');
     function apply(){
       const q = (searchEl.value||'').toLowerCase();
-      let approved = requests.filter(r=>r.approval_status==='Approved');
+      let approved = requests.filter(r=>statusEq(r.approval_status,'Approved'));
       if(q){
         approved = approved.filter(r=>{
           const hay = [r.site_project,r.parts,r.machine,r.requested_by,r.make,r.model].join(' ').toLowerCase();
@@ -1226,7 +1235,7 @@
         return;
       }
       listEl.innerHTML = approved.map(storeCard).join('');
-      countEl.textContent = approved.length + ' of ' + requests.filter(r=>r.approval_status==='Approved').length + ' requests';
+      countEl.textContent = approved.length + ' of ' + requests.filter(r=>statusEq(r.approval_status,'Approved')).length + ' requests';
       wireStoreCards();
     }
     searchEl.addEventListener('input', apply);
