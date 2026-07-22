@@ -70,6 +70,10 @@
 
   table.pst-table{width:100%; border-collapse:collapse; font-size:12.5px;}
   table.pst-table th{text-align:left; font-family:'Inter',sans-serif; font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); border-bottom:2px solid var(--line); padding:8px 8px; white-space:nowrap;}
+  table.pst-table th.ov-sortable{cursor:pointer; user-select:none;}
+  table.pst-table th.ov-sortable:hover{color:var(--ink);}
+  table.pst-table th.ov-sorted{color:var(--accent, var(--ink));}
+  .ov-sort-arrow{font-size:9px;}
   table.pst-table td{padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top;}
   table.pst-table tr:hover td{background:#f7f9fa;}
   .pst-mono{font-family:'IBM Plex Mono',monospace; font-size:11.5px;}
@@ -870,11 +874,31 @@
   }
 
   // ---------- OVERVIEW ----------
+  const OV_SORT_COLUMNS = [
+    {key:'serial', label:'Sl. No.'},
+    {key:'date', label:'Date'},
+    {key:'site', label:'Site/Project'},
+    {key:'machine', label:'Machine'},
+    {key:'parts', label:'Parts'},
+    {key:'qty', label:'Qty'},
+    {key:'priority', label:'Priority'},
+    {key:'requested_by', label:'Requested By'},
+    {key:'approval', label:'Approval'},
+    {key:'delivery', label:'Delivery'},
+    {key:'do_no', label:'DO No.'},
+    {key:'delivery_date', label:'Delivery Date'},
+    {key:'received_by', label:'Received By'},
+    {key:'installation', label:'Installation'},
+    {key:'remarks', label:'Remarks'}
+  ];
   function overviewView(){
+    const headCells = OV_SORT_COLUMNS.map(c=>
+      `<th class="ov-sortable" data-sort="${c.key}">${c.label}<span class="ov-sort-arrow"></span></th>`
+    ).join('');
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">All Requests</p>
-        <p class="pst-panel-desc">Full log of spare part requests across every stage.</p>
+        <p class="pst-panel-desc">Full log of spare part requests across every stage. Click a column heading to sort.</p>
         <div class="pst-toolbar">
           <input type="text" id="ov-search" placeholder="Search site, part, machine, requester…">
           <select id="ov-approval">
@@ -890,9 +914,8 @@
         </div>
         <div style="overflow-x:auto;">
         <table class="pst-table">
-          <thead><tr>
-            <th>Sl. No.</th><th>Date</th><th>Site/Project</th><th>Machine</th><th>Parts</th><th>Qty</th>
-            <th>Priority</th><th>Requested By</th><th>Approval</th><th>Delivery</th><th>DO No.</th><th>Delivery Date</th><th>Received By</th><th>Installation</th><th>Remarks</th><th>Name Plate</th><th>History Card</th>${session.role==='admin' ? '<th></th>' : ''}
+          <thead><tr id="ov-thead">
+            ${headCells}<th>Name Plate</th><th>History Card</th>${session.role==='admin' ? '<th></th>' : ''}
           </tr></thead>
           <tbody id="ov-tbody"></tbody>
         </table>
@@ -927,6 +950,43 @@
     if(!url) return '<span style="color:var(--ink-soft);">—</span>';
     return `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></a>`;
   }
+  let ovSort = {key:null, dir:1};
+  function priorityRank(p){
+    const v = String(p||'').trim().toLowerCase();
+    if(v==='high') return 0;
+    if(v==='medium') return 1;
+    if(v==='low') return 2;
+    return 3;
+  }
+  const OV_SORT_VALUE = {
+    serial: r=> r.id || '',
+    date: r=> r.request_date || '',
+    site: r=> (r.site_project||'').toLowerCase(),
+    machine: r=> (r.machine||'').toLowerCase(),
+    parts: r=> (r.parts||'').toLowerCase(),
+    qty: r=> Number(r.quantity)||0,
+    priority: r=> priorityRank(r.priority),
+    requested_by: r=> (r.requested_by||'').toLowerCase(),
+    approval: r=> (r.approval_status||'').toLowerCase(),
+    delivery: r=> (r.delivery_status||'').toLowerCase(),
+    do_no: r=> (r.do_no||'').toLowerCase(),
+    delivery_date: r=> r.delivery_date || '',
+    received_by: r=> (r.received_person||'').toLowerCase(),
+    installation: r=> (r.installation_status||'').toLowerCase(),
+    remarks: r=> (r.remarks||'').toLowerCase()
+  };
+  function sortRequests(list){
+    if(!ovSort.key) return list;
+    const getVal = OV_SORT_VALUE[ovSort.key];
+    if(!getVal) return list;
+    const sorted = list.slice().sort((a,b)=>{
+      const av = getVal(a), bv = getVal(b);
+      if(av < bv) return -1 * ovSort.dir;
+      if(av > bv) return 1 * ovSort.dir;
+      return 0;
+    });
+    return sorted;
+  }
   function wireOverview(){
     const tbody = document.getElementById('ov-tbody');
     const countEl = document.getElementById('ov-count');
@@ -943,6 +1003,7 @@
         }
         return true;
       });
+      list = sortRequests(list);
       tbody.innerHTML = ovRows(list);
       countEl.textContent = list.length + ' of ' + requests.length + ' requests';
       tbody.querySelectorAll('tr[data-id]').forEach(row=>{
@@ -983,6 +1044,31 @@
       document.getElementById(id).addEventListener('change', apply);
     });
     document.getElementById('ov-export').addEventListener('click', exportCSV);
+    function updateSortArrows(){
+      document.querySelectorAll('#ov-thead th.ov-sortable').forEach(th=>{
+        const arrow = th.querySelector('.ov-sort-arrow');
+        if(th.dataset.sort === ovSort.key){
+          arrow.textContent = ovSort.dir===1 ? ' ▲' : ' ▼';
+          th.classList.add('ov-sorted');
+        }else{
+          arrow.textContent = '';
+          th.classList.remove('ov-sorted');
+        }
+      });
+    }
+    document.querySelectorAll('#ov-thead th.ov-sortable').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const key = th.dataset.sort;
+        if(ovSort.key===key){
+          ovSort.dir = -ovSort.dir;
+        }else{
+          ovSort = {key, dir:1};
+        }
+        updateSortArrows();
+        apply();
+      });
+    });
+    updateSortArrows();
     apply();
   }
   function openInStoreUpdate(r){
