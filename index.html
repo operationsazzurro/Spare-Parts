@@ -920,6 +920,17 @@
           <tbody id="ov-tbody"></tbody>
         </table>
         </div>
+        <div class="pst-toolbar" style="margin-top:12px; border-top:1px solid var(--line); padding-top:12px;">
+          <button class="pst-btn pst-btn-ghost" id="ov-prev">‹ Prev</button>
+          <span class="pst-count" id="ov-page-label"></span>
+          <button class="pst-btn pst-btn-ghost" id="ov-next">Next ›</button>
+          <select id="ov-pagesize" style="margin-left:auto;">
+            <option value="50">50 per page</option>
+            <option value="100">100 per page</option>
+            <option value="200">200 per page</option>
+            <option value="all">Show all</option>
+          </select>
+        </div>
       </div>`;
   }
   function ovRows(list){
@@ -951,6 +962,8 @@
     return `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></a>`;
   }
   let ovSort = {key:'date', dir:-1};
+  let ovPage = 1;
+  let ovPageSize = 50;
   function priorityRank(p){
     const v = String(p||'').trim().toLowerCase();
     if(v==='high') return 0;
@@ -990,6 +1003,11 @@
   function wireOverview(){
     const tbody = document.getElementById('ov-tbody');
     const countEl = document.getElementById('ov-count');
+    const pageLabelEl = document.getElementById('ov-page-label');
+    const prevBtn = document.getElementById('ov-prev');
+    const nextBtn = document.getElementById('ov-next');
+    const pageSizeEl = document.getElementById('ov-pagesize');
+    pageSizeEl.value = String(ovPageSize);
     function apply(){
       const q = document.getElementById('ov-search').value.toLowerCase();
       const ap = document.getElementById('ov-approval').value;
@@ -1004,8 +1022,22 @@
         return true;
       });
       list = sortRequests(list);
-      tbody.innerHTML = ovRows(list);
-      countEl.textContent = list.length + ' of ' + requests.length + ' requests';
+      const total = list.length;
+      const pageSize = ovPageSize==='all' ? total : ovPageSize;
+      const totalPages = pageSize>0 ? Math.max(1, Math.ceil(total/pageSize)) : 1;
+      if(ovPage > totalPages) ovPage = totalPages;
+      if(ovPage < 1) ovPage = 1;
+      const start = pageSize>0 ? (ovPage-1)*pageSize : 0;
+      const pageList = ovPageSize==='all' ? list : list.slice(start, start+pageSize);
+      tbody.innerHTML = ovRows(pageList);
+      countEl.textContent = total + ' of ' + requests.length + ' requests';
+      if(ovPageSize==='all' || total===0){
+        pageLabelEl.textContent = total===0 ? 'No results' : `Showing all ${total}`;
+      }else{
+        pageLabelEl.textContent = `Page ${ovPage} of ${totalPages} (${start+1}–${Math.min(start+pageSize,total)} of ${total})`;
+      }
+      prevBtn.disabled = ovPage<=1 || ovPageSize==='all';
+      nextBtn.disabled = ovPage>=totalPages || ovPageSize==='all';
       tbody.querySelectorAll('tr[data-id]').forEach(row=>{
         row.style.cursor = 'pointer';
         row.addEventListener('click', ()=>{
@@ -1040,10 +1072,17 @@
       }
     }
     ['ov-search','ov-approval','ov-delivery'].forEach(id=>{
-      document.getElementById(id).addEventListener('input', apply);
-      document.getElementById(id).addEventListener('change', apply);
+      document.getElementById(id).addEventListener('input', ()=>{ ovPage=1; apply(); });
+      document.getElementById(id).addEventListener('change', ()=>{ ovPage=1; apply(); });
     });
     document.getElementById('ov-export').addEventListener('click', exportCSV);
+    prevBtn.addEventListener('click', ()=>{ if(ovPage>1){ ovPage--; apply(); } });
+    nextBtn.addEventListener('click', ()=>{ ovPage++; apply(); });
+    pageSizeEl.addEventListener('change', ()=>{
+      ovPageSize = pageSizeEl.value==='all' ? 'all' : parseInt(pageSizeEl.value);
+      ovPage = 1;
+      apply();
+    });
     function updateSortArrows(){
       document.querySelectorAll('#ov-thead th.ov-sortable').forEach(th=>{
         const arrow = th.querySelector('.ov-sort-arrow');
@@ -1064,6 +1103,7 @@
         }else{
           ovSort = {key, dir:1};
         }
+        ovPage = 1;
         updateSortArrows();
         apply();
       });
