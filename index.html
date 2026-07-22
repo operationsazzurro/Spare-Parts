@@ -892,7 +892,7 @@
         <table class="pst-table">
           <thead><tr>
             <th>Sl. No.</th><th>Date</th><th>Site/Project</th><th>Machine</th><th>Parts</th><th>Qty</th>
-            <th>Priority</th><th>Requested By</th><th>Approval</th><th>Delivery</th><th>DO No.</th><th>Delivery Date</th><th>Received By</th><th>Installation</th><th>Name Plate</th><th>History Card</th>${session.role==='admin' ? '<th></th>' : ''}
+            <th>Priority</th><th>Requested By</th><th>Approval</th><th>Delivery</th><th>DO No.</th><th>Delivery Date</th><th>Received By</th><th>Installation</th><th>Remarks</th><th>Name Plate</th><th>History Card</th>${session.role==='admin' ? '<th></th>' : ''}
           </tr></thead>
           <tbody id="ov-tbody"></tbody>
         </table>
@@ -900,7 +900,7 @@
       </div>`;
   }
   function ovRows(list){
-    if(!list.length) return `<tr><td colspan="17" class="pst-empty">No matching requests.</td></tr>`;
+    if(!list.length) return `<tr><td colspan="18" class="pst-empty">No matching requests.</td></tr>`;
     return list.map(r=>`
       <tr data-id="${r.id}">
         <td class="pst-mono">${reqSerial(r)}</td>
@@ -917,6 +917,7 @@
         <td>${fmtDate(r.delivery_date)||'—'}</td>
         <td>${esc(r.received_person||'—')}</td>
         <td>${installPill(r.installation_status)}</td>
+        <td style="max-width:180px; white-space:pre-wrap;">${esc(r.remarks||'—')}</td>
         <td>${photoThumb(r.nameplate_photo_url)}</td>
         <td>${photoThumb(r.history_card_photo_url)}</td>
         ${session.role==='admin' ? `<td><button class="pst-icon-btn ov-delete" title="Delete record" data-id="${r.id}">🗑</button></td>` : ''}
@@ -1152,9 +1153,16 @@
           ${priorityPill(r.priority)}
         </div>
         <div class="pst-card-detail"><b>Reason:</b> ${esc(r.reason||'—')}</div>
-        <div class="pst-btn-row">
+        <div class="pst-btn-row ap-actions">
           <button class="pst-btn pst-btn-green ap-approve">Approve</button>
           <button class="pst-btn pst-btn-red ap-reject">Reject</button>
+        </div>
+        <div class="ap-reject-box" style="display:none; margin-top:10px;">
+          <div class="pst-field full"><label>Rejection Reason</label><textarea class="ap-reject-reason" placeholder="Why is this being rejected?"></textarea></div>
+          <div class="pst-btn-row">
+            <button class="pst-btn pst-btn-red ap-reject-confirm">Confirm Rejection</button>
+            <button class="pst-btn pst-btn-ghost ap-reject-cancel">Cancel</button>
+          </div>
         </div>
         <div class="ap-msg"></div>
       </div>`;
@@ -1170,13 +1178,22 @@
     list.querySelectorAll('.pst-card').forEach(card=>{
       const id = card.dataset.id;
       const msgEl = card.querySelector('.ap-msg');
-      async function act(status){
+      const actionsEl = card.querySelector('.ap-actions');
+      const rejectBox = card.querySelector('.ap-reject-box');
+      const reasonEl = card.querySelector('.ap-reject-reason');
+      async function act(status, extraRemarks){
         const approver = document.getElementById('ap-name').value.trim();
         if(!approver){ msgEl.innerHTML = '<div class="pst-msg pst-msg-err">Enter your name first.</div>'; return; }
+        const payload = {
+          approval_status: status, approved_by: approver, approval_date: new Date().toISOString().slice(0,10)
+        };
+        if(extraRemarks){
+          const existingReq = requests.find(x=>x.id===id);
+          const existing = (existingReq && existingReq.remarks) ? existingReq.remarks.trim() : '';
+          payload.remarks = existing ? existing + '\n' + extraRemarks : extraRemarks;
+        }
         try{
-          await sb(PARTS_TABLE+'?id=eq.'+id, {method:'PATCH', body:{
-            approval_status: status, approved_by: approver, approval_date: new Date().toISOString().slice(0,10)
-          }});
+          await sb(PARTS_TABLE+'?id=eq.'+id, {method:'PATCH', body:payload});
           await saveName('mgr', approver);
           card.style.opacity='0.4';
           msgEl.innerHTML = `<div class="pst-msg pst-msg-ok">Marked ${status}.</div>`;
@@ -1186,7 +1203,25 @@
         }
       }
       card.querySelector('.ap-approve').addEventListener('click', ()=>act('Approved'));
-      card.querySelector('.ap-reject').addEventListener('click', ()=>act('Rejected'));
+      card.querySelector('.ap-reject').addEventListener('click', ()=>{
+        actionsEl.style.display = 'none';
+        rejectBox.style.display = 'block';
+        reasonEl.focus();
+      });
+      card.querySelector('.ap-reject-cancel').addEventListener('click', ()=>{
+        rejectBox.style.display = 'none';
+        actionsEl.style.display = 'flex';
+        reasonEl.value = '';
+        msgEl.innerHTML = '';
+      });
+      card.querySelector('.ap-reject-confirm').addEventListener('click', ()=>{
+        const reason = reasonEl.value.trim();
+        if(!reason){
+          msgEl.innerHTML = '<div class="pst-msg pst-msg-err">Please enter a reason for rejecting this request.</div>';
+          return;
+        }
+        act('Rejected', `Rejected: ${reason}`);
+      });
     });
   }
 
