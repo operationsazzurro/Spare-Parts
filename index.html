@@ -70,6 +70,8 @@
   .pst-count{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-left:auto;}
 
   table.pst-table{width:100%; min-width:1550px; border-collapse:collapse; font-size:12.5px;}
+  .pst-table-scroll{overflow:auto; max-height:65vh; border:1px solid var(--line); border-radius:8px;}
+  .pst-table-scroll table.pst-table th{position:sticky; top:0; background:var(--panel); z-index:1; box-shadow:0 1px 0 var(--line);}
   table.pst-table th{text-align:left; font-family:'Inter',sans-serif; font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); border-bottom:2px solid var(--line); padding:8px 8px; white-space:nowrap;}
   table.pst-table th.ov-sortable{cursor:pointer; user-select:none;}
   table.pst-table th.ov-sortable:hover{color:var(--ink);}
@@ -132,7 +134,7 @@
     .pst-tab{padding:10px 14px; font-size:12.5px; flex-shrink:0;}
     .pst-body{padding:14px;}
     .pst-panel{padding:14px;}
-    table.pst-table{display:block; overflow-x:auto;}
+    .pst-table-scroll{max-height:60vh;}
     .pst-toolbar{flex-direction:column; align-items:stretch;}
     .pst-toolbar input, .pst-toolbar select, .pst-toolbar button{width:100%;}
     .pst-count{margin-left:0; text-align:right;}
@@ -915,7 +917,7 @@
           <button class="pst-btn pst-btn-ghost" id="ov-export">Export CSV</button>
           <span class="pst-count" id="ov-count"></span>
         </div>
-        <div style="overflow-x:auto;">
+        <div class="pst-table-scroll">
         <table class="pst-table">
           <thead><tr id="ov-thead">
             ${headCells}<th>Name Plate</th><th>History Card</th>${session.role==='admin' ? '<th></th>' : ''}
