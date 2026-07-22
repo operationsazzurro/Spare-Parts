@@ -397,7 +397,7 @@
   async function loadRequests(){
     loading = true;
     try{
-      requests = await sb(PARTS_TABLE+'?select=*&order=created_at.desc') || [];
+      requests = await sb(PARTS_TABLE+'?select=*&order=created_at.desc.nullslast') || [];
     }catch(e){
       requests = [];
       throw e;
