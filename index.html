@@ -1119,7 +1119,19 @@
           <div class="pst-field"><label>Date</label><input type="date" id="rq-date" value="${today}"></div>
           <div class="pst-field"><label>Requested By</label><input type="text" id="rq-name" value="${esc(name)}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
           <div class="pst-field"><label>Site / Project</label><input type="text" id="rq-site" placeholder="e.g. Site A – Block 3"></div>
-          <div class="pst-field"><label>Machine</label><input type="text" id="rq-machine" placeholder="e.g. Air Compressor"></div>
+          <div class="pst-field"><label>Machine</label>
+            <select id="rq-machine">
+              <option value="">Select machine</option>
+              <option>Road Sweeper</option>
+              <option>Pressure Washer</option>
+              <option>Walk Behind</option>
+              <option>Rideon</option>
+              <option>Scrubber Machine</option>
+              <option>Vaccuum Machine</option>
+              <option>Wet & Dry Machine</option>
+              <option>Air Blower</option>
+            </select>
+          </div>
           <div class="pst-field"><label>Make</label><input type="text" id="rq-make"></div>
           <div class="pst-field"><label>Model</label><input type="text" id="rq-model"></div>
           <div class="pst-field"><label>Machine Serial No.</label><input type="text" id="rq-serial"></div>
@@ -1146,6 +1158,7 @@
       document.getElementById('rq-date').value = new Date().toISOString().slice(0,10);
       document.getElementById('rq-site').value = '';
       document.getElementById('rq-machine').value = '';
+
       document.getElementById('rq-make').value = '';
       document.getElementById('rq-model').value = '';
       document.getElementById('rq-serial').value = '';
