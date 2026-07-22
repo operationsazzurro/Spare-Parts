@@ -1399,7 +1399,7 @@
             </div>
             <div class="pst-field"><label>DO No.</label><input type="text" class="st-do" value="${esc(r.do_no||'')}"></div>
             <div class="pst-field"><label>Delivery Date</label><input type="date" class="st-date" value="${r.delivery_date||''}"></div>
-            <div class="pst-field"><label>Received Person</label><input type="text" class="st-received" value="${esc(r.received_person || requesterIdentity())}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
+            <div class="pst-field"><label>Received Person</label><input type="text" class="st-received" value="${esc(r.received_person||'')}" placeholder="Name of person who received the delivery"></div>
             <div class="pst-field"><label>Installation Status</label>
               <select class="st-install">
                 ${['Pending','Installed','Not Required'].map(s=>`<option ${statusEq(r.installation_status,s)?'selected':''}>${s}</option>`).join('')}
