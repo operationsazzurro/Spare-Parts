@@ -950,7 +950,7 @@
     if(!url) return '<span style="color:var(--ink-soft);">—</span>';
     return `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></a>`;
   }
-  let ovSort = {key:null, dir:1};
+  let ovSort = {key:'date', dir:-1};
   function priorityRank(p){
     const v = String(p||'').trim().toLowerCase();
     if(v==='high') return 0;
