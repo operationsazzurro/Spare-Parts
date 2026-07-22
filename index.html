@@ -691,6 +691,9 @@
     }
     return String(val).trim();
   }
+  function dupKey(r){
+    return [r.site_project, r.parts, r.request_date].map(v=>String(v||'').trim().toLowerCase()).join('|');
+  }
   async function parseImportFile(file){
     const XLSX = await loadXLSX();
     const buf = await file.arrayBuffer();
@@ -742,7 +745,7 @@
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Bulk Import from Excel</p>
-        <p class="pst-panel-desc">Upload an .xlsx/.xls/.csv file of existing spare part records. Column headers must match the database field names — download the template below to get the exact headers. Extra columns are ignored; each row needs at least <span class="pst-mono">site_project</span> and <span class="pst-mono">parts</span> filled in.</p>
+        <p class="pst-panel-desc">Upload an .xlsx/.xls/.csv file of existing spare part records. Column headers must match the database field names — download the template below to get the exact headers. Extra columns are ignored; each row needs at least <span class="pst-mono">site_project</span> and <span class="pst-mono">parts</span> filled in. Re-uploading is safe: rows matching an existing record's Site/Project + Parts + Date are automatically skipped, so nothing gets duplicated.</p>
         <div class="pst-btn-row" style="margin-top:0;">
           <button class="pst-btn pst-btn-ghost" id="imp-template">Download Template</button>
         </div>
@@ -796,11 +799,32 @@
           btn.disabled = false;
           return;
         }
-        msg.innerHTML = `<div class="pst-msg pst-msg-ok">Importing 0 of ${rows.length}…</div>`;
-        const {imported, errors} = await importRows(rows, (done, total)=>{
+        msg.innerHTML = '<div class="pst-msg pst-msg-ok">Checking for duplicates…</div>';
+        await loadRequests(); // refresh so dedup checks against the latest data
+        const existingKeys = new Set(requests.map(dupKey));
+        const seenInFile = new Set();
+        const toImport = [];
+        let duplicateCount = 0;
+        rows.forEach(row=>{
+          const key = dupKey(row);
+          if(existingKeys.has(key) || seenInFile.has(key)){
+            duplicateCount++;
+            return;
+          }
+          seenInFile.add(key);
+          toImport.push(row);
+        });
+        if(!toImport.length){
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">Nothing to import — all ${rows.length} row(s) already exist (matched on Site/Project + Parts + Date).</div>`;
+          btn.disabled = false;
+          return;
+        }
+        msg.innerHTML = `<div class="pst-msg pst-msg-ok">Importing 0 of ${toImport.length}…</div>`;
+        const {imported, errors} = await importRows(toImport, (done, total)=>{
           msg.innerHTML = `<div class="pst-msg pst-msg-ok">Importing ${done} of ${total}…</div>`;
         });
-        let summary = `<div class="pst-msg ${errors.length?'pst-msg-err':'pst-msg-ok'}">Imported ${imported} of ${rows.length} row(s).`;
+        let summary = `<div class="pst-msg ${errors.length?'pst-msg-err':'pst-msg-ok'}">Imported ${imported} of ${toImport.length} new row(s).`;
+        if(duplicateCount) summary += ` ${duplicateCount} row(s) skipped as duplicates (matched Site/Project + Parts + Date).`;
         if(skipped.length) summary += ` ${skipped.length} row(s) skipped (missing required fields).`;
         if(errors.length) summary += `<br>${errors.map(esc).join('<br>')}`;
         summary += '</div>';
