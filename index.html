@@ -1086,7 +1086,8 @@
       nextBtn.disabled = ovPage>=totalPages || ovPageSize==='all';
       tbody.querySelectorAll('tr[data-id]').forEach(row=>{
         row.style.cursor = 'pointer';
-        row.addEventListener('click', ()=>{
+        row.addEventListener('click', (e)=>{
+          if(e.target.closest('a, button')) return;
           const id = row.dataset.id;
           const r = requests.find(x=>x.id===id);
           if(r) openInStoreUpdate(r);
