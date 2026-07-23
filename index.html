@@ -202,6 +202,7 @@
     approver:    [['overview','Overview'],['approve','Approvals']],
     admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users']]
   };
+  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users']];
   const ROLE_LABEL = {guest:'Guest', unassigned:'Pending', technician:'Technician', approver:'Approver', admin:'Admin'};
 
   const root = document.getElementById('pst-root');
@@ -211,10 +212,17 @@
   const whoamiEl = document.getElementById('pst-whoami');
   const gearBtn = document.getElementById('pst-gear');
 
+  function tabsForSession(){
+    if(session && Array.isArray(session.allowedTabs) && session.allowedTabs.length){
+      const tabs = ALL_TABS.filter(([key])=> session.allowedTabs.includes(key));
+      return tabs.length ? tabs : TAB_ACCESS[session.role] || [];
+    }
+    return TAB_ACCESS[session.role] || [];
+  }
   function renderTabsBar(){
     if(!session){ tabsEl.innerHTML=''; tabsEl.style.display='none'; return; }
     tabsEl.style.display='flex';
-    const tabs = TAB_ACCESS[session.role] || [];
+    const tabs = tabsForSession();
     if(!tabs.find(t=>t[0]===currentTab)) currentTab = tabs[0][0];
     tabsEl.innerHTML = tabs.map(([key,label])=>
       `<button class="pst-tab ${key===currentTab?'active':''}" data-tab="${key}">${label}</button>`
@@ -624,7 +632,8 @@
       role: resolveRole(p),
       name: p ? p.name : '',
       id: p ? p.id : null,
-      email: p ? p.email : ''
+      email: p ? p.email : '',
+      allowedTabs: p && Array.isArray(p.allowed_tabs) ? p.allowed_tabs : null
     };
   }
   function wireLanding(){
@@ -791,9 +800,13 @@
         <p class="pst-panel-title">Manage Users &amp; Privileges</p>
         <p class="pst-panel-desc">Everyone who has signed up shows up here. Assign each person a role — new sign-ups start as "Pending" (Guest-level access) until you do. The "Legacy Admin" column reflects your existing <span class="pst-mono">is_admin</span> flag — anyone with it set also gets full admin access here automatically, even without a role assigned.</p>
         <table class="pst-userlist">
-          <thead><tr><th>Name</th><th>Email</th><th>Legacy Admin</th><th>Role</th><th></th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Legacy Admin</th><th>Role</th><th></th><th>Tabs</th><th></th></tr></thead>
           <tbody id="adm-user-rows">
-            ${users.map(u=>`
+            ${users.map(u=>{
+              const roleDefaultKeys = (TAB_ACCESS[resolveRole(u)]||[]).map(t=>t[0]);
+              const effectiveKeys = Array.isArray(u.allowed_tabs) && u.allowed_tabs.length ? u.allowed_tabs : roleDefaultKeys;
+              const isCustom = Array.isArray(u.allowed_tabs) && u.allowed_tabs.length>0;
+              return `
               <tr data-id="${u.id}">
                 <td>${esc(u.name||'—')}</td>
                 <td style="color:var(--ink-soft); font-size:12px;">${esc(u.email||'—')}</td>
@@ -803,11 +816,30 @@
                   ${['technician','approver','admin'].map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('')}
                 </select></td>
                 <td><button class="pst-btn pst-btn-ghost au-save" style="padding:6px 12px; font-size:12px;">Save</button></td>
+                <td><button class="pst-btn pst-btn-ghost au-tabs-toggle" style="padding:6px 12px; font-size:12px;">${isCustom?'Custom':'Default'}</button></td>
                 <td><button class="pst-icon-btn au-delete" title="Delete user" data-id="${u.id}" data-name="${esc(u.name||u.email||'this user')}">🗑</button></td>
-              </tr>`).join('')}
+              </tr>
+              <tr class="au-tabs-row" data-id="${u.id}" style="display:none;">
+                <td colspan="7" style="background:var(--bg);">
+                  <div style="padding:12px 4px;">
+                    <p style="font-size:12px; color:var(--ink-soft); margin:0 0 8px;">Choose exactly which tabs <b style="color:var(--ink);">${esc(u.name||u.email||'this user')}</b> can see. Untick "Use role default" to set a custom list — otherwise their role's normal tabs apply automatically, even if the role changes later.</p>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; margin-bottom:10px; font-weight:600;">
+                      <input type="checkbox" class="au-tabs-usedefault" ${!isCustom?'checked':''}> Use role default
+                    </label>
+                    <div class="au-tabs-checks" style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px; ${!isCustom?'opacity:0.5; pointer-events:none;':''}">
+                      ${ALL_TABS.map(([key,label])=>`<label style="display:flex; align-items:center; gap:6px; font-size:12.5px;"><input type="checkbox" class="au-tab-checkbox" value="${key}" ${effectiveKeys.includes(key)?'checked':''}> ${esc(label)}</label>`).join('')}
+                    </div>
+                    <div class="pst-btn-row" style="margin-top:0;">
+                      <button class="pst-btn pst-btn-primary au-tabs-save" style="padding:6px 12px; font-size:12px;">Save Tabs</button>
+                    </div>
+                    <div class="au-tabs-msg"></div>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
-        <p class="pst-panel-desc" style="margin-top:10px; margin-bottom:0;">Deleting a user permanently removes their login account and profile — they'll need to sign up again from scratch to regain access. This requires the <span class="pst-mono">delete-user</span> Edge Function to be deployed on your Supabase project (see setup notes).</p>
+        <p class="pst-panel-desc" style="margin-top:10px; margin-bottom:0;">Deleting a user permanently removes their login account and profile — they'll need to sign up again from scratch to regain access. This requires the <span class="pst-mono">delete-user</span> Edge Function to be deployed on your Supabase project (see setup notes). Per-user tab assignment requires an <span class="pst-mono">allowed_tabs</span> column (type <span class="pst-mono">jsonb</span> or <span class="pst-mono">text[]</span>) on the <span class="pst-mono">profiles</span> table — if saving a custom tab list fails, that column likely needs to be added.</p>
         <div id="adm-list-msg"></div>
       </div>`;
   }
@@ -866,7 +898,7 @@
         btn.disabled = false;
       }
     });
-    document.querySelectorAll('#adm-user-rows tr').forEach(row=>{
+    document.querySelectorAll('#adm-user-rows tr:not(.au-tabs-row)').forEach(row=>{
       const id = row.dataset.id;
       row.querySelector('.au-save').addEventListener('click', async ()=>{
         const role = row.querySelector('.au-role').value || null;
@@ -889,10 +921,58 @@
         try{
           await deleteUserAccount(id);
           row.remove();
+          const tabsRow = document.querySelector(`.au-tabs-row[data-id="${id}"]`);
+          if(tabsRow) tabsRow.remove();
           msg.innerHTML = '<div class="pst-msg pst-msg-ok">User account deleted.</div>';
         }catch(e){
           msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
           delBtn.disabled = false;
+        }
+      });
+      row.querySelector('.au-tabs-toggle').addEventListener('click', ()=>{
+        const tabsRow = document.querySelector(`.au-tabs-row[data-id="${id}"]`);
+        if(!tabsRow) return;
+        tabsRow.style.display = tabsRow.style.display==='none' ? '' : 'none';
+      });
+    });
+    document.querySelectorAll('.au-tabs-row').forEach(row=>{
+      const id = row.dataset.id;
+      const useDefaultCb = row.querySelector('.au-tabs-usedefault');
+      const checksWrap = row.querySelector('.au-tabs-checks');
+      const msgEl = row.querySelector('.au-tabs-msg');
+      useDefaultCb.addEventListener('change', ()=>{
+        if(useDefaultCb.checked){
+          checksWrap.style.opacity = '0.5';
+          checksWrap.style.pointerEvents = 'none';
+        }else{
+          checksWrap.style.opacity = '1';
+          checksWrap.style.pointerEvents = 'auto';
+        }
+      });
+      row.querySelector('.au-tabs-save').addEventListener('click', async ()=>{
+        const mainRow = document.querySelector(`#adm-user-rows tr[data-id="${id}"]:not(.au-tabs-row)`);
+        const toggleLabel = mainRow ? mainRow.querySelector('.au-tabs-toggle') : null;
+        let payload;
+        if(useDefaultCb.checked){
+          payload = {allowed_tabs: null};
+        }else{
+          const checked = Array.from(row.querySelectorAll('.au-tab-checkbox:checked')).map(cb=>cb.value);
+          if(!checked.length){
+            msgEl.innerHTML = '<div class="pst-msg pst-msg-err">Select at least one tab, or tick "Use role default".</div>';
+            return;
+          }
+          payload = {allowed_tabs: checked};
+        }
+        try{
+          await sb('profiles?id=eq.'+id, {method:'PATCH', body:payload});
+          msgEl.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
+          if(toggleLabel) toggleLabel.textContent = useDefaultCb.checked ? 'Default' : 'Custom';
+          if(session.id===id){
+            session.allowedTabs = useDefaultCb.checked ? null : payload.allowed_tabs;
+            renderTabsBar();
+          }
+        }catch(e){
+          msgEl.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
         }
       });
     });
@@ -1259,9 +1339,9 @@
     apply();
   }
   function openInStoreUpdate(r){
-    const tabs = TAB_ACCESS[session.role] || [];
+    const tabs = tabsForSession();
     if(!tabs.find(t=>t[0]==='store')){
-      alert('Store Update isn\'t available for your role.');
+      alert('Store Update isn\'t available for your account.');
       return;
     }
     if(!statusEq(r.approval_status,'Approved')){
@@ -1638,7 +1718,8 @@
           role: resolveRole(restored),
           name: restored.name,
           id: restored.id,
-          email: restored.email
+          email: restored.email,
+          allowedTabs: Array.isArray(restored.allowed_tabs) ? restored.allowed_tabs : null
         };
       }
     }catch(e){}
