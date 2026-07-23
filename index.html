@@ -482,6 +482,32 @@
     }
     return `${config.url}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
   }
+  function storagePathFromUrl(url){
+    if(!url) return null;
+    const marker = `/storage/v1/object/public/${PHOTO_BUCKET}/`;
+    const idx = url.indexOf(marker);
+    if(idx===-1) return null;
+    return url.slice(idx + marker.length).split('?')[0];
+  }
+  async function deletePhoto(url){
+    const path = storagePathFromUrl(url);
+    if(!path) return;
+    try{
+      await fetch(`${config.url}/storage/v1/object/${PHOTO_BUCKET}/${path}`, {
+        method: 'DELETE',
+        headers: {
+          'apikey': config.key,
+          'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key)
+        }
+      });
+    }catch(e){
+      // Best-effort: if this fails (e.g. already gone, or storage delete not permitted),
+      // we still want the record deletion itself to succeed.
+    }
+  }
+  async function deletePhotos(urls){
+    await Promise.all(urls.filter(Boolean).map(deletePhoto));
+  }
 
   // ---------- admin: delete user account (via Edge Function) ----------
   async function deleteUserAccount(userId){
@@ -1452,6 +1478,7 @@
               if(!result || result.length===0){
                 throw new Error('Nothing was deleted. Your database permissions (Row Level Security) likely don\'t allow admins to delete records yet — see the delete policy note in Manage Users / ask whoever set up Supabase to run the DELETE policy SQL.');
               }
+              if(r) deletePhotos([r.nameplate_photo_url, r.history_card_photo_url]); // best-effort, don't block on this
               requests = requests.filter(x=>x.id!==id);
               renderLadder();
               apply();
@@ -2003,6 +2030,7 @@
               if(!result || result.length===0){
                 throw new Error('Nothing was deleted. Your database permissions (Row Level Security) may not allow admins to delete assets yet.');
               }
+              if(a) deletePhotos([a.machine_photo_url, a.nameplate_photo_url]); // best-effort, don't block on this
               assets = assets.filter(x=>x.id!==id);
               apply();
             }catch(err){
