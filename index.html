@@ -72,6 +72,14 @@
   table.pst-table{width:100%; min-width:1550px; border-collapse:collapse; font-size:12.5px;}
   .pst-table-scroll{overflow:auto; max-height:65vh; border:1px solid var(--line); border-radius:8px;}
   .pst-table-scroll table.pst-table th{position:sticky; top:0; background:var(--panel); z-index:1; box-shadow:0 1px 0 var(--line);}
+  .pst-lightbox{position:fixed; inset:0; z-index:300; display:flex; align-items:center; justify-content:center; padding:24px;}
+  .pst-lightbox-backdrop{position:absolute; inset:0; background:rgba(10,16,22,0.88);}
+  .pst-lightbox-content{position:relative; z-index:1; max-width:min(92vw,900px); max-height:90vh; background:var(--panel); border-radius:10px; padding:18px; display:flex; flex-direction:column; align-items:center; gap:14px;}
+  .pst-lightbox-close{position:absolute; top:8px; right:8px; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:15px; color:var(--ink-soft); line-height:1;}
+  .pst-lightbox-close:hover{color:var(--ink); border-color:var(--accent);}
+  .pst-lightbox-img{max-width:100%; max-height:68vh; border-radius:6px; object-fit:contain;}
+  .pst-lightbox-loading{padding:60px 50px; color:var(--ink-soft); font-size:13px;}
+  .pst-lightbox-actions{display:flex; gap:8px;}
   table.pst-table th{text-align:left; font-family:'Inter',sans-serif; font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); border-bottom:2px solid var(--line); padding:8px 8px; white-space:nowrap;}
   table.pst-table th.ov-sortable{cursor:pointer; user-select:none;}
   table.pst-table th.ov-sortable:hover{color:var(--ink);}
@@ -158,6 +166,18 @@
   <div class="pst-tabs" id="pst-tabs"></div>
 
   <div class="pst-body" id="pst-body"></div>
+</div>
+
+<div id="pst-lightbox" class="pst-lightbox" style="display:none;">
+  <div class="pst-lightbox-backdrop" id="pst-lightbox-backdrop"></div>
+  <div class="pst-lightbox-content">
+    <button class="pst-lightbox-close" id="pst-lightbox-close" aria-label="Close">✕</button>
+    <div id="pst-lightbox-loading" class="pst-lightbox-loading">Loading photo…</div>
+    <img id="pst-lightbox-img" class="pst-lightbox-img" style="display:none;" alt="Photo preview">
+    <div class="pst-lightbox-actions">
+      <a href="#" id="pst-lightbox-download" class="pst-btn pst-btn-primary" download>Download</a>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -968,11 +988,11 @@
   function photoThumb(url){
     if(!url) return '<span style="color:var(--ink-soft);">—</span>';
     if(isHeicUrl(url)){
-      return `<a href="${esc(url)}" target="_blank" rel="noopener" class="pst-heic-thumb" data-src="${esc(url)}">
+      return `<span class="pst-photo-thumb pst-heic-thumb" data-full="${esc(url)}" data-heic="1" data-src="${esc(url)}" style="cursor:pointer; display:inline-block;">
         <span class="pst-heic-placeholder" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:4px; border:1px solid var(--line); background:var(--gray-soft); font-size:8.5px; font-weight:700; color:var(--ink-soft);">HEIC</span>
-      </a>`;
+      </span>`;
     }
-    return `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></a>`;
+    return `<span class="pst-photo-thumb" data-full="${esc(url)}" style="cursor:pointer; display:inline-block;"><img src="${esc(url)}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></span>`;
   }
   let heic2anyLoadPromise = null;
   function loadHeic2Any(){
@@ -987,20 +1007,27 @@
     });
     return heic2anyLoadPromise;
   }
+  const heicPreviewCache = {}; // original url -> converted JPEG object URL, reused by thumbnails and the lightbox
+  async function getHeicPreview(url){
+    if(heicPreviewCache[url]) return heicPreviewCache[url];
+    const heic2any = await loadHeic2Any();
+    const resp = await fetch(url);
+    if(!resp.ok) throw new Error('Could not fetch photo');
+    const blob = await resp.blob();
+    const converted = await heic2any({blob, toType:'image/jpeg', quality:0.85});
+    const outBlob = Array.isArray(converted) ? converted[0] : converted;
+    const objUrl = URL.createObjectURL(outBlob);
+    heicPreviewCache[url] = objUrl;
+    return objUrl;
+  }
   async function convertHeicThumb(el){
     const url = el.dataset.src;
     const placeholder = el.querySelector('.pst-heic-placeholder');
     try{
-      const heic2any = await loadHeic2Any();
-      const resp = await fetch(url);
-      if(!resp.ok) throw new Error('Could not fetch photo');
-      const blob = await resp.blob();
-      const converted = await heic2any({blob, toType:'image/jpeg', quality:0.6});
-      const outBlob = Array.isArray(converted) ? converted[0] : converted;
-      const objUrl = URL.createObjectURL(outBlob);
+      const objUrl = await getHeicPreview(url);
       el.innerHTML = `<img src="${objUrl}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);">`;
     }catch(e){
-      if(placeholder) placeholder.title = 'Could not preview this HEIC photo — click to open the original.';
+      if(placeholder) placeholder.title = 'Could not preview this HEIC photo — click to view options.';
     }
   }
   function renderHeicThumbs(container){
@@ -1008,6 +1035,76 @@
       convertHeicThumb(el);
     });
   }
+  function wirePhotoThumbs(container){
+    container.querySelectorAll('.pst-photo-thumb').forEach(el=>{
+      el.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        openLightbox(el.dataset.full, el.dataset.heic==='1');
+      });
+    });
+  }
+  // ---------- LIGHTBOX ----------
+  let lightboxUrl = null;
+  const lbOverlay = document.getElementById('pst-lightbox');
+  const lbImg = document.getElementById('pst-lightbox-img');
+  const lbLoading = document.getElementById('pst-lightbox-loading');
+  const lbDownload = document.getElementById('pst-lightbox-download');
+  function photoFilename(url){
+    try{ return decodeURIComponent(url.split('/').pop().split('?')[0]) || 'photo'; }
+    catch(e){ return 'photo'; }
+  }
+  async function downloadPhoto(url, filename){
+    try{
+      const resp = await fetch(url);
+      if(!resp.ok) throw new Error('Download failed');
+      const blob = await resp.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = filename || 'photo';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(objUrl), 4000);
+    }catch(e){
+      window.open(url, '_blank'); // fallback if fetch is blocked for any reason
+    }
+  }
+  function openLightbox(url, isHeic){
+    lightboxUrl = url;
+    lbOverlay.style.display = 'flex';
+    lbImg.style.display = 'none';
+    lbLoading.style.display = 'block';
+    lbLoading.textContent = 'Loading photo…';
+    lbDownload.dataset.url = url;
+    lbDownload.dataset.filename = photoFilename(url);
+    const showImg = (src)=>{
+      if(lightboxUrl!==url) return; // user moved on before this resolved
+      lbImg.src = src;
+      lbImg.style.display = 'block';
+      lbLoading.style.display = 'none';
+    };
+    if(isHeic){
+      getHeicPreview(url).then(showImg).catch(()=>{
+        if(lightboxUrl!==url) return;
+        lbLoading.textContent = "Could not preview this HEIC photo, but you can still download the original below.";
+      });
+    }else{
+      showImg(url);
+    }
+  }
+  function closeLightbox(){
+    lbOverlay.style.display = 'none';
+    lbImg.src = '';
+    lightboxUrl = null;
+  }
+  document.getElementById('pst-lightbox-close').addEventListener('click', closeLightbox);
+  document.getElementById('pst-lightbox-backdrop').addEventListener('click', closeLightbox);
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && lbOverlay.style.display!=='none') closeLightbox(); });
+  lbDownload.addEventListener('click', (e)=>{
+    e.preventDefault();
+    downloadPhoto(lbDownload.dataset.url, lbDownload.dataset.filename);
+  });
   let ovSort = {key:'date', dir:-1};
   let ovPage = 1;
   let ovPageSize = 50;
@@ -1078,6 +1175,7 @@
       const pageList = ovPageSize==='all' ? list : list.slice(start, start+pageSize);
       tbody.innerHTML = ovRows(pageList);
       renderHeicThumbs(tbody);
+      wirePhotoThumbs(tbody);
       countEl.textContent = total + ' of ' + requests.length + ' requests';
       if(ovPageSize==='all' || total===0){
         pageLabelEl.textContent = total===0 ? 'No results' : `Showing all ${total}`;
