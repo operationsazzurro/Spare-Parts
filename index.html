@@ -183,26 +183,32 @@
 <script>
 (function(){
   const PARTS_TABLE = "spare_parts_requests";
+  const ASSETS_TABLE = "assets";
+  const SITES_TABLE = "sites";
   const DEFAULT_CONFIG = {
     url: "https://hktyjebgxtblmyshinmp.supabase.co",
     key: "sb_publishable_TgY-U8AsTvbHFEtkwU9C9Q_zi9ZAieW"
   };
   let config = null;
   let requests = [];
+  let assets = [];
+  let sites = [];
   let currentTab = "overview";
   let loading = false;
   let session = null; // { role: 'guest'|'technician'|'approver'|'admin'|null, name, id, email }
   let authTokens = null; // { access_token, refresh_token } for the logged-in real user
   let pendingOpenRecordId = null; // set when navigating from Overview -> Store Update for a specific record
 
+  const MACHINE_TYPES = ['Road Sweeper','Pressure Washer','Walk Behind','Rideon','Scrubber Machine','Vaccuum Machine','Wet & Dry Machine','Air Blower'];
+
   const TAB_ACCESS = {
     guest:       [['overview','Overview']],
     unassigned:  [['overview','Overview']],
     technician:  [['overview','Overview'],['request','New Request'],['store','Store Update']],
     approver:    [['overview','Overview'],['approve','Approvals']],
-    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users']]
+    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
   };
-  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users']];
+  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']];
   const ROLE_LABEL = {guest:'Guest', unassigned:'Pending', technician:'Technician', approver:'Approver', admin:'Admin'};
 
   const root = document.getElementById('pst-root');
@@ -438,6 +444,21 @@
       loading = false;
     }
   }
+  async function loadAssets(){
+    try{
+      assets = await sb(ASSETS_TABLE+'?select=*&order=created_at.desc.nullslast') || [];
+    }catch(e){
+      assets = [];
+      throw e;
+    }
+  }
+  async function loadSites(){
+    try{
+      sites = await sb(SITES_TABLE+'?select=*&order=site_name.asc') || [];
+    }catch(e){
+      sites = [];
+    }
+  }
 
   // ---------- photo upload (Supabase Storage) ----------
   const PHOTO_BUCKET = "spare-parts-photos";
@@ -553,6 +574,12 @@
     body.innerHTML = '<div class="pst-panel"><p class="pst-panel-desc">Loading requests…</p></div>';
     try{
       await loadRequests();
+      if(currentTab==='asset_view' || currentTab==='asset_add'){
+        await loadAssets();
+      }
+      if(currentTab==='asset_add'){
+        await loadSites();
+      }
     }catch(e){
       body.innerHTML = `<div class="pst-msg pst-msg-err">Could not load data: ${esc(e.message)}</div>`;
       return;
@@ -568,6 +595,8 @@
     else if(currentTab==='approve'){ body.innerHTML = pendingBanner + await approveView(); wireApprove(); }
     else if(currentTab==='store'){ body.innerHTML = pendingBanner + await storeView(); wireStore(); }
     else if(currentTab==='admin'){ body.innerHTML = pendingBanner + await adminPanelView(); wireAdminPanel(); }
+    else if(currentTab==='asset_view'){ body.innerHTML = pendingBanner + assetViewView(); wireAssetView(); }
+    else if(currentTab==='asset_add'){ body.innerHTML = pendingBanner + await assetAddView(); wireAssetAdd(); }
   }
 
   function emptyState(title, desc){
@@ -761,14 +790,14 @@
     });
     return {rows, skipped};
   }
-  async function importRows(rows, onProgress){
+  async function importRows(rows, onProgress, table){
     const CHUNK = 200;
     let imported = 0;
     const errors = [];
     for(let i=0; i<rows.length; i+=CHUNK){
       const chunk = rows.slice(i, i+CHUNK);
       try{
-        await sb(PARTS_TABLE, {method:'POST', body:chunk});
+        await sb(table || PARTS_TABLE, {method:'POST', body:chunk});
         imported += chunk.length;
       }catch(e){
         errors.push(`Rows ${i+1}–${i+chunk.length}: ${e.message}`);
@@ -778,8 +807,38 @@
     return {imported, errors};
   }
 
+  // ---------- SITE NAMES import (feeds the Site Name dropdown in Add Asset) ----------
+  function downloadSiteTemplate(){
+    loadXLSX().then(XLSX=>{
+      const ws = XLSX.utils.aoa_to_sheet([['site_name'], ['Site A – Block 3'], ['Site B – Warehouse']]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Site Names');
+      XLSX.writeFile(wb, 'site_names_import_template.xlsx');
+    }).catch(e=>{ alert(e.message); });
+  }
+  async function parseSiteImportFile(file){
+    const XLSX = await loadXLSX();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:true});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rawRows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    const names = [];
+    rawRows.forEach(raw=>{
+      const norm = {};
+      Object.keys(raw).forEach(k=>{ norm[normalizeHeader(k)] = raw[k]; });
+      let val = norm['site_name'] !== undefined ? norm['site_name']
+        : norm['sitename'] !== undefined ? norm['sitename']
+        : norm['site'] !== undefined ? norm['site']
+        : Object.values(raw)[0]; // fall back to first column if header wasn't recognized
+      val = String(val||'').trim();
+      if(val) names.push(val);
+    });
+    return names;
+  }
+
   async function adminPanelView(){
     const users = await sb('profiles?select=*&order=role.asc.nullsfirst,name.asc') || [];
+    await loadSites();
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Bulk Import from Excel</p>
@@ -795,6 +854,35 @@
           <button class="pst-btn pst-btn-primary" id="imp-go">Import Rows</button>
         </div>
         <div id="imp-msg"></div>
+      </div>
+      <div class="pst-panel">
+        <p class="pst-panel-title">Site Names</p>
+        <p class="pst-panel-desc">This list feeds the "Site Name" dropdown on the Add Asset form. Upload your existing Excel sheet of site names once (single column), or add sites one at a time below. Re-uploading is safe — matching names are skipped automatically.</p>
+        <div class="pst-btn-row" style="margin-top:0;">
+          <button class="pst-btn pst-btn-ghost" id="site-template">Download Template</button>
+        </div>
+        <div class="pst-field full" style="margin-top:14px;">
+          <label>Excel / CSV File</label>
+          <input type="file" id="site-file" accept=".xlsx,.xls,.csv">
+        </div>
+        <div class="pst-btn-row">
+          <button class="pst-btn pst-btn-primary" id="site-import-go">Import Site Names</button>
+        </div>
+        <div id="site-import-msg"></div>
+        <div class="pst-field full" style="margin-top:18px; border-top:1px solid var(--line); padding-top:14px;">
+          <label>Add a Single Site</label>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="site-single-name" placeholder="e.g. Site C – Main Campus" style="flex:1;">
+            <button class="pst-btn pst-btn-primary" id="site-single-add" style="flex-shrink:0;">Add</button>
+          </div>
+        </div>
+        <div id="site-single-msg"></div>
+        <div style="margin-top:16px;">
+          <p style="font-size:12px; color:var(--ink-soft); margin:0 0 8px;">${sites.length} site${sites.length===1?'':'s'} configured</p>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; max-height:180px; overflow-y:auto;" id="site-list-chips">
+            ${sites.length ? sites.map(s=>`<span class="pill pill-gray" style="display:inline-flex; align-items:center; gap:6px;">${esc(s.site_name)}<button class="site-chip-delete" data-id="${s.id}" title="Remove" style="border:none; background:none; cursor:pointer; color:var(--ink-soft); font-size:13px; line-height:1; padding:0;">✕</button></span>`).join('') : '<span style="color:var(--ink-soft); font-size:12.5px;">No sites added yet.</span>'}
+          </div>
+        </div>
       </div>
       <div class="pst-panel">
         <p class="pst-panel-title">Manage Users &amp; Privileges</p>
@@ -897,6 +985,83 @@
       }finally{
         btn.disabled = false;
       }
+    });
+    document.getElementById('site-template').addEventListener('click', downloadSiteTemplate);
+    document.getElementById('site-import-go').addEventListener('click', async ()=>{
+      const msg = document.getElementById('site-import-msg');
+      const fileInput = document.getElementById('site-file');
+      const btn = document.getElementById('site-import-go');
+      const file = fileInput.files[0];
+      if(!file){ msg.innerHTML = '<div class="pst-msg pst-msg-err">Choose a file first.</div>'; return; }
+      btn.disabled = true;
+      msg.innerHTML = '<div class="pst-msg pst-msg-ok">Reading file…</div>';
+      try{
+        const names = await parseSiteImportFile(file);
+        if(!names.length){
+          msg.innerHTML = '<div class="pst-msg pst-msg-err">No site names found in that file.</div>';
+          btn.disabled = false;
+          return;
+        }
+        await loadSites();
+        const existing = new Set(sites.map(s=>s.site_name.trim().toLowerCase()));
+        const seen = new Set();
+        const toImport = [];
+        let duplicateCount = 0;
+        names.forEach(n=>{
+          const key = n.trim().toLowerCase();
+          if(existing.has(key) || seen.has(key)){ duplicateCount++; return; }
+          seen.add(key);
+          toImport.push({site_name: n});
+        });
+        if(!toImport.length){
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">Nothing to import — all ${names.length} site name(s) already exist.</div>`;
+          btn.disabled = false;
+          return;
+        }
+        const {imported, errors} = await importRows(toImport, null, SITES_TABLE);
+        let summary = `<div class="pst-msg ${errors.length?'pst-msg-err':'pst-msg-ok'}">Added ${imported} new site name(s).`;
+        if(duplicateCount) summary += ` ${duplicateCount} already existed and were skipped.`;
+        if(errors.length) summary += `<br>${errors.map(esc).join('<br>')}`;
+        summary += '</div>';
+        msg.innerHTML = summary;
+        fileInput.value = '';
+        if(imported>0){ render(); }
+      }catch(e){
+        msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+      }finally{
+        btn.disabled = false;
+      }
+    });
+    document.getElementById('site-single-add').addEventListener('click', async ()=>{
+      const input = document.getElementById('site-single-name');
+      const msg = document.getElementById('site-single-msg');
+      const name = input.value.trim();
+      if(!name){ msg.innerHTML = '<div class="pst-msg pst-msg-err">Enter a site name first.</div>'; return; }
+      const exists = sites.some(s=>s.site_name.trim().toLowerCase()===name.toLowerCase());
+      if(exists){ msg.innerHTML = '<div class="pst-msg pst-msg-err">That site already exists.</div>'; return; }
+      try{
+        await sb(SITES_TABLE, {method:'POST', body:[{site_name: name}]});
+        input.value = '';
+        msg.innerHTML = '<div class="pst-msg pst-msg-ok">Added.</div>';
+        render();
+      }catch(e){
+        msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+      }
+    });
+    document.querySelectorAll('.site-chip-delete').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.id;
+        const site = sites.find(s=>s.id===id);
+        if(!confirm(`Remove site "${site ? site.site_name : ''}" from the dropdown list?`)) return;
+        btn.disabled = true;
+        try{
+          await sb(SITES_TABLE+'?id=eq.'+id, {method:'DELETE'});
+          render();
+        }catch(e){
+          alert('Could not remove: '+e.message);
+          btn.disabled = false;
+        }
+      });
     });
     document.querySelectorAll('#adm-user-rows tr:not(.au-tabs-row)').forEach(row=>{
       const id = row.dataset.id;
@@ -1389,14 +1554,7 @@
           <div class="pst-field"><label>Machine</label>
             <select id="rq-machine">
               <option value="">Select machine</option>
-              <option>Road Sweeper</option>
-              <option>Pressure Washer</option>
-              <option>Walk Behind</option>
-              <option>Rideon</option>
-              <option>Scrubber Machine</option>
-              <option>Vaccuum Machine</option>
-              <option>Wet & Dry Machine</option>
-              <option>Air Blower</option>
+              ${MACHINE_TYPES.map(m=>`<option>${esc(m)}</option>`).join('')}
             </select>
           </div>
           <div class="pst-field"><label>Make</label><input type="text" id="rq-make"></div>
@@ -1706,6 +1864,303 @@
       }
       pendingOpenRecordId = null;
     }
+  }
+
+  // ---------- ASSET MANAGEMENT ----------
+  const AS_SORT_COLUMNS = [
+    {key:'site', label:'Site Name'},
+    {key:'location', label:'Location'},
+    {key:'barcode', label:'Barcode'},
+    {key:'machine', label:'Machine Name'},
+    {key:'model', label:'Model No'},
+    {key:'serial', label:'Serial No'},
+    {key:'year', label:'Year Installed'},
+    {key:'last_service', label:'Last Service'},
+    {key:'technician', label:'Technician'}
+  ];
+  const AS_SORT_VALUE = {
+    site: a=> (a.site_name||'').toLowerCase(),
+    location: a=> (a.location||'').toLowerCase(),
+    barcode: a=> (a.barcode||'').toLowerCase(),
+    machine: a=> (a.machine_name||'').toLowerCase(),
+    model: a=> (a.model_no||'').toLowerCase(),
+    serial: a=> (a.serial_no||'').toLowerCase(),
+    year: a=> Number(a.year_of_installation)||0,
+    last_service: a=> a.date_of_last_service || '',
+    technician: a=> (a.technician_name||'').toLowerCase()
+  };
+  let asSort = {key:null, dir:1};
+  let asPage = 1;
+  let asPageSize = 50;
+  function sortAssets(list){
+    if(!asSort.key) return list;
+    const getVal = AS_SORT_VALUE[asSort.key];
+    if(!getVal) return list;
+    return list.slice().sort((a,b)=>{
+      const av = getVal(a), bv = getVal(b);
+      if(av < bv) return -1 * asSort.dir;
+      if(av > bv) return 1 * asSort.dir;
+      return 0;
+    });
+  }
+  function assetViewView(){
+    const headCells = AS_SORT_COLUMNS.map(c=>
+      `<th class="ov-sortable" data-sort="${c.key}">${c.label}<span class="ov-sort-arrow"></span></th>`
+    ).join('');
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Asset Management</p>
+        <p class="pst-panel-desc">Machine assets logged across all sites. Click a column heading to sort, click a photo to view it full-size.</p>
+        <div class="pst-toolbar">
+          <input type="text" id="as-search" placeholder="Search site, machine, serial, technician…">
+          <span class="pst-count" id="as-count"></span>
+        </div>
+        <div class="pst-table-scroll">
+        <table class="pst-table">
+          <thead><tr id="as-thead">
+            ${headCells}<th>Machine Photo</th><th>Name Plate</th>${session.role==='admin' ? '<th></th>' : ''}
+          </tr></thead>
+          <tbody id="as-tbody"></tbody>
+        </table>
+        </div>
+        <div class="pst-toolbar" style="margin-top:12px; border-top:1px solid var(--line); padding-top:12px;">
+          <button class="pst-btn pst-btn-ghost" id="as-prev">‹ Prev</button>
+          <span class="pst-count" id="as-page-label"></span>
+          <button class="pst-btn pst-btn-ghost" id="as-next">Next ›</button>
+          <select id="as-pagesize" style="margin-left:auto;">
+            <option value="50">50 per page</option>
+            <option value="100">100 per page</option>
+            <option value="200">200 per page</option>
+            <option value="all">Show all</option>
+          </select>
+        </div>
+      </div>`;
+  }
+  function asRows(list){
+    if(!list.length) return `<tr><td colspan="12" class="pst-empty">No matching assets.</td></tr>`;
+    return list.map(a=>`
+      <tr data-id="${a.id}">
+        <td>${esc(a.site_name||'—')}</td>
+        <td>${esc(a.location||'—')}</td>
+        <td class="pst-mono">${esc(a.barcode||'—')}</td>
+        <td>${esc(a.machine_name||'—')}</td>
+        <td>${esc(a.model_no||'—')}</td>
+        <td class="pst-mono">${esc(a.serial_no||'—')}</td>
+        <td>${esc(a.year_of_installation||'—')}</td>
+        <td>${fmtDate(a.date_of_last_service)}</td>
+        <td>${esc(a.technician_name||'—')}</td>
+        <td>${photoThumb(a.machine_photo_url)}</td>
+        <td>${photoThumb(a.nameplate_photo_url)}</td>
+        ${session.role==='admin' ? `<td><button class="pst-icon-btn as-delete" title="Delete asset" data-id="${a.id}">🗑</button></td>` : ''}
+      </tr>`).join('');
+  }
+  function wireAssetView(){
+    const tbody = document.getElementById('as-tbody');
+    const countEl = document.getElementById('as-count');
+    const pageLabelEl = document.getElementById('as-page-label');
+    const prevBtn = document.getElementById('as-prev');
+    const nextBtn = document.getElementById('as-next');
+    const pageSizeEl = document.getElementById('as-pagesize');
+    const searchEl = document.getElementById('as-search');
+    pageSizeEl.value = String(asPageSize);
+    function apply(){
+      const q = searchEl.value.toLowerCase();
+      let list = assets.filter(a=>{
+        if(!q) return true;
+        const hay = [a.site_name,a.location,a.machine_name,a.model_no,a.serial_no,a.technician_name,a.barcode].join(' ').toLowerCase();
+        return hay.includes(q);
+      });
+      list = sortAssets(list);
+      const total = list.length;
+      const pageSize = asPageSize==='all' ? total : asPageSize;
+      const totalPages = pageSize>0 ? Math.max(1, Math.ceil(total/pageSize)) : 1;
+      if(asPage > totalPages) asPage = totalPages;
+      if(asPage < 1) asPage = 1;
+      const start = pageSize>0 ? (asPage-1)*pageSize : 0;
+      const pageList = asPageSize==='all' ? list : list.slice(start, start+pageSize);
+      tbody.innerHTML = asRows(pageList);
+      renderHeicThumbs(tbody);
+      wirePhotoThumbs(tbody);
+      countEl.textContent = total + ' of ' + assets.length + ' assets';
+      if(asPageSize==='all' || total===0){
+        pageLabelEl.textContent = total===0 ? 'No results' : `Showing all ${total}`;
+      }else{
+        pageLabelEl.textContent = `Page ${asPage} of ${totalPages} (${start+1}–${Math.min(start+pageSize,total)} of ${total})`;
+      }
+      prevBtn.disabled = asPage<=1 || asPageSize==='all';
+      nextBtn.disabled = asPage>=totalPages || asPageSize==='all';
+      if(session.role==='admin'){
+        tbody.querySelectorAll('.as-delete').forEach(btn=>{
+          btn.addEventListener('click', async (e)=>{
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const a = assets.find(x=>x.id===id);
+            const label = a ? `${a.machine_name||'asset'} (${a.serial_no||a.site_name||''})` : 'this asset';
+            if(!confirm(`Delete asset "${label}"? This cannot be undone.`)) return;
+            btn.disabled = true;
+            try{
+              const result = await sb(ASSETS_TABLE+'?id=eq.'+id, {method:'DELETE'});
+              if(!result || result.length===0){
+                throw new Error('Nothing was deleted. Your database permissions (Row Level Security) may not allow admins to delete assets yet.');
+              }
+              assets = assets.filter(x=>x.id!==id);
+              apply();
+            }catch(err){
+              alert('Could not delete: '+err.message);
+              btn.disabled = false;
+            }
+          });
+        });
+      }
+    }
+    searchEl.addEventListener('input', ()=>{ asPage=1; apply(); });
+    prevBtn.addEventListener('click', ()=>{ if(asPage>1){ asPage--; apply(); } });
+    nextBtn.addEventListener('click', ()=>{ asPage++; apply(); });
+    pageSizeEl.addEventListener('change', ()=>{
+      asPageSize = pageSizeEl.value==='all' ? 'all' : parseInt(pageSizeEl.value);
+      asPage = 1;
+      apply();
+    });
+    function updateSortArrows(){
+      document.querySelectorAll('#as-thead th.ov-sortable').forEach(th=>{
+        const arrow = th.querySelector('.ov-sort-arrow');
+        if(th.dataset.sort === asSort.key){
+          arrow.textContent = asSort.dir===1 ? ' ▲' : ' ▼';
+          th.classList.add('ov-sorted');
+        }else{
+          arrow.textContent = '';
+          th.classList.remove('ov-sorted');
+        }
+      });
+    }
+    document.querySelectorAll('#as-thead th.ov-sortable').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const key = th.dataset.sort;
+        if(asSort.key===key){ asSort.dir = -asSort.dir; }
+        else{ asSort = {key, dir:1}; }
+        asPage = 1;
+        updateSortArrows();
+        apply();
+      });
+    });
+    updateSortArrows();
+    apply();
+  }
+
+  // ---------- ADD ASSET (Technician / customizable) ----------
+  async function assetAddView(){
+    const name = requesterIdentity();
+    const siteOptions = sites.length
+      ? sites.map(s=>`<option>${esc(s.site_name)}</option>`).join('')
+      : '';
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Add Asset</p>
+        <p class="pst-panel-desc">Log a new machine asset for a site. Barcode scanning isn't available yet — leave it blank for now if the machine doesn't have one.</p>
+        ${!sites.length ? `<div class="pst-msg pst-msg-err">No sites are configured yet. Ask an admin to add site names in Manage Users → Site Names before assets can be logged.</div>` : ''}
+        <div class="pst-grid">
+          <div class="pst-field"><label>Site Name</label>
+            <select id="as-add-site" ${!sites.length?'disabled':''}>
+              <option value="">Select site</option>
+              ${siteOptions}
+            </select>
+          </div>
+          <div class="pst-field"><label>Location</label><input type="text" id="as-add-location" placeholder="e.g. Basement Parking, Block C"></div>
+          <div class="pst-field"><label>Barcode</label><input type="text" id="as-add-barcode" placeholder="Not available yet — leave blank"></div>
+          <div class="pst-field"><label>Machine Name</label>
+            <select id="as-add-machine">
+              <option value="">Select machine</option>
+              ${MACHINE_TYPES.map(m=>`<option>${esc(m)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="pst-field"><label>Model No</label><input type="text" id="as-add-model"></div>
+          <div class="pst-field"><label>Serial No</label><input type="text" id="as-add-serial"></div>
+          <div class="pst-field"><label>Year of Installation</label><input type="number" id="as-add-year" min="1980" max="2100" placeholder="e.g. 2023"></div>
+          <div class="pst-field"><label>Date of Last Service</label><input type="date" id="as-add-lastservice"></div>
+          <div class="pst-field"><label>Technician Name</label><input type="text" id="as-add-tech" value="${esc(name)}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
+          <div class="pst-field"><label>Machine Photo</label><input type="file" id="as-add-photo-machine" accept="image/*"></div>
+          <div class="pst-field"><label>Name Plate Photo</label><input type="file" id="as-add-photo-nameplate" accept="image/*"></div>
+        </div>
+        <div class="pst-btn-row">
+          <button class="pst-btn pst-btn-primary" id="as-add-submit">Submit Asset</button>
+          <button class="pst-btn pst-btn-ghost" id="as-add-clear" type="button">Clear Form</button>
+        </div>
+        <div id="as-add-msg"></div>
+      </div>`;
+  }
+  function wireAssetAdd(){
+    document.getElementById('as-add-clear').addEventListener('click', ()=>{
+      const msg = document.getElementById('as-add-msg');
+      if(!confirm('Clear all fields in this form?')) return;
+      document.getElementById('as-add-site').value = '';
+      document.getElementById('as-add-location').value = '';
+      document.getElementById('as-add-barcode').value = '';
+      document.getElementById('as-add-machine').value = '';
+      document.getElementById('as-add-model').value = '';
+      document.getElementById('as-add-serial').value = '';
+      document.getElementById('as-add-year').value = '';
+      document.getElementById('as-add-lastservice').value = '';
+      document.getElementById('as-add-photo-machine').value = '';
+      document.getElementById('as-add-photo-nameplate').value = '';
+      msg.innerHTML = '';
+    });
+    document.getElementById('as-add-submit').addEventListener('click', async ()=>{
+      const msg = document.getElementById('as-add-msg');
+      const submitBtn = document.getElementById('as-add-submit');
+      const site = document.getElementById('as-add-site').value.trim();
+      const machine = document.getElementById('as-add-machine').value.trim();
+      const serial = document.getElementById('as-add-serial').value.trim();
+      const name = requesterIdentity();
+      if(!site || !machine || !serial || !name){
+        msg.innerHTML = '<div class="pst-msg pst-msg-err">Please fill in at least Site Name, Machine Name and Serial No.</div>';
+        return;
+      }
+      const machineFile = document.getElementById('as-add-photo-machine').files[0] || null;
+      const nameplateFile = document.getElementById('as-add-photo-nameplate').files[0] || null;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting…';
+      msg.innerHTML = '';
+      try{
+        let machineUrl = null, nameplateUrl = null;
+        if(machineFile || nameplateFile){
+          msg.innerHTML = '<div class="pst-msg pst-msg-ok">Uploading photos…</div>';
+          [machineUrl, nameplateUrl] = await Promise.all([
+            uploadPhoto(machineFile, 'asset-machine'),
+            uploadPhoto(nameplateFile, 'asset-nameplate')
+          ]);
+        }
+        const yearVal = document.getElementById('as-add-year').value;
+        const payload = {
+          site_name: site,
+          location: document.getElementById('as-add-location').value.trim(),
+          barcode: document.getElementById('as-add-barcode').value.trim() || null,
+          machine_name: machine,
+          model_no: document.getElementById('as-add-model').value.trim(),
+          serial_no: serial,
+          year_of_installation: yearVal ? parseInt(yearVal) : null,
+          date_of_last_service: document.getElementById('as-add-lastservice').value || null,
+          technician_name: name,
+          machine_photo_url: machineUrl,
+          nameplate_photo_url: nameplateUrl
+        };
+        await sb(ASSETS_TABLE, {method:'POST', body:[payload]});
+        msg.innerHTML = '<div class="pst-msg pst-msg-ok">Asset saved.</div>';
+        document.getElementById('as-add-location').value = '';
+        document.getElementById('as-add-barcode').value = '';
+        document.getElementById('as-add-machine').value = '';
+        document.getElementById('as-add-model').value = '';
+        document.getElementById('as-add-serial').value = '';
+        document.getElementById('as-add-year').value = '';
+        document.getElementById('as-add-lastservice').value = '';
+        document.getElementById('as-add-photo-machine').value = '';
+        document.getElementById('as-add-photo-nameplate').value = '';
+      }catch(e){
+        msg.innerHTML = `<div class="pst-msg pst-msg-err">Could not submit: ${esc(e.message)}</div>`;
+      }finally{
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Asset';
+      }
+    });
   }
 
   // ---------- init ----------
