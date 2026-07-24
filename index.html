@@ -603,7 +603,7 @@
       if(currentTab==='asset_view' || currentTab==='asset_add'){
         await loadAssets();
       }
-      if(currentTab==='asset_add'){
+      if(currentTab==='asset_add' || currentTab==='request'){
         await loadSites();
       }
     }catch(e){
@@ -1570,14 +1570,23 @@
   async function requestView(){
     const name = requesterIdentity();
     const today = new Date().toISOString().slice(0,10);
+    const siteOptions = sites.length
+      ? sites.map(s=>`<option>${esc(s.site_name)}</option>`).join('')
+      : '';
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">New Spare Part Request</p>
         <p class="pst-panel-desc">Site technicians: fill this in when you need a part. It goes straight to the approval queue.</p>
+        ${!sites.length ? `<div class="pst-msg pst-msg-err">No sites are configured yet. Ask an admin to add site names in Manage Users → Site Names before requests can be logged.</div>` : ''}
         <div class="pst-grid">
           <div class="pst-field"><label>Date</label><input type="date" id="rq-date" value="${today}"></div>
           <div class="pst-field"><label>Requested By</label><input type="text" id="rq-name" value="${esc(name)}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
-          <div class="pst-field"><label>Site / Project</label><input type="text" id="rq-site" placeholder="e.g. Site A – Block 3"></div>
+          <div class="pst-field"><label>Site / Project</label>
+            <select id="rq-site" ${!sites.length?'disabled':''}>
+              <option value="">Select site</option>
+              ${siteOptions}
+            </select>
+          </div>
           <div class="pst-field"><label>Machine</label>
             <select id="rq-machine">
               <option value="">Select machine</option>
