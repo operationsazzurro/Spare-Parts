@@ -69,7 +69,7 @@
   .pst-toolbar input[type=text]{flex:1; min-width:160px;}
   .pst-count{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-left:auto;}
 
-  table.pst-table{width:100%; min-width:1550px; border-collapse:collapse; font-size:12.5px;}
+  table.pst-table{width:100%; min-width:1800px; border-collapse:collapse; font-size:12.5px;}
   .pst-table-scroll{overflow:auto; max-height:65vh; border:1px solid var(--line); border-radius:8px;}
   .pst-table-scroll table.pst-table th{position:sticky; top:0; background:var(--panel); z-index:1; box-shadow:0 1px 0 var(--line);}
   .pst-lightbox{position:fixed; inset:0; z-index:300; display:flex; align-items:center; justify-content:center; padding:24px;}
@@ -206,9 +206,9 @@
     unassigned:  [['overview','Overview']],
     technician:  [['overview','Overview'],['request','New Request'],['store','Store Update']],
     approver:    [['overview','Overview'],['approve','Approvals']],
-    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
+    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
   };
-  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']];
+  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']];
   const ROLE_LABEL = {guest:'Guest', unassigned:'Pending', technician:'Technician', approver:'Approver', admin:'Admin'};
 
   const root = document.getElementById('pst-root');
@@ -559,6 +559,38 @@
   function reqSerial(r){
     return 'SR-' + String(r.id).slice(0,8).toUpperCase();
   }
+  function copyToClipboard(text, el){
+    const showCopied = ()=>{
+      if(!el) return;
+      const original = el.textContent;
+      const originalColor = el.style.color;
+      el.textContent = 'Copied!';
+      el.style.color = 'var(--accent)';
+      setTimeout(()=>{
+        el.textContent = original;
+        el.style.color = originalColor;
+      }, 900);
+    };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(showCopied).catch(()=>{
+        fallbackCopy(text);
+        showCopied();
+      });
+    }else{
+      fallbackCopy(text);
+      showCopied();
+    }
+  }
+  function fallbackCopy(text){
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try{ document.execCommand('copy'); }catch(e){}
+    document.body.removeChild(ta);
+  }
 
   function renderLadder(){
     const total = requests.length;
@@ -620,6 +652,7 @@
     else if(currentTab==='request'){ body.innerHTML = pendingBanner + await requestView(); wireRequest(); }
     else if(currentTab==='approve'){ body.innerHTML = pendingBanner + await approveView(); wireApprove(); }
     else if(currentTab==='store'){ body.innerHTML = pendingBanner + await storeView(); wireStore(); }
+    else if(currentTab==='procurement'){ body.innerHTML = pendingBanner + await procurementView(); wireProcurement(); }
     else if(currentTab==='admin'){ body.innerHTML = pendingBanner + await adminPanelView(); wireAdminPanel(); }
     else if(currentTab==='asset_view'){ body.innerHTML = pendingBanner + assetViewView(); wireAssetView(); }
     else if(currentTab==='asset_add'){ body.innerHTML = pendingBanner + await assetAddView(); wireAssetAdd(); }
@@ -1180,6 +1213,8 @@
     {key:'priority', label:'Priority'},
     {key:'requested_by', label:'Requested By'},
     {key:'approval', label:'Approval'},
+    {key:'pr_no', label:'PR No.'},
+    {key:'lpo_no', label:'LPO No.'},
     {key:'delivery', label:'Delivery'},
     {key:'do_no', label:'DO No.'},
     {key:'delivery_date', label:'Delivery Date'},
@@ -1211,7 +1246,7 @@
         <div class="pst-table-scroll">
         <table class="pst-table">
           <thead><tr id="ov-thead">
-            ${headCells}<th>Name Plate</th><th>History Card</th>${session.role==='admin' ? '<th></th>' : ''}
+            ${headCells}<th>Name Plate</th><th>History Card</th><th></th>${session.role==='admin' ? '<th></th>' : ''}
           </tr></thead>
           <tbody id="ov-tbody"></tbody>
         </table>
@@ -1230,10 +1265,10 @@
       </div>`;
   }
   function ovRows(list){
-    if(!list.length) return `<tr><td colspan="18" class="pst-empty">No matching requests.</td></tr>`;
+    if(!list.length) return `<tr><td colspan="21" class="pst-empty">No matching requests.</td></tr>`;
     return list.map(r=>`
       <tr data-id="${r.id}">
-        <td class="pst-mono">${reqSerial(r)}</td>
+        <td class="pst-mono"><span class="ov-copy-serial" data-copy="${reqSerial(r)}" title="Click to copy" style="cursor:pointer; border-bottom:1px dashed var(--line);">${reqSerial(r)}</span></td>
         <td>${fmtDate(r.request_date)}</td>
         <td>${esc(r.site_project)}</td>
         <td>${esc(r.machine)}<br><span style="color:var(--ink-soft); font-size:11px;">${esc(r.make||'')} ${esc(r.model||'')}</span></td>
@@ -1242,6 +1277,8 @@
         <td>${priorityPill(r.priority)}</td>
         <td>${esc(r.requested_by)}</td>
         <td>${approvalPill(r.approval_status)}</td>
+        <td class="pst-mono">${esc(r.pr_no||'—')}</td>
+        <td class="pst-mono">${esc(r.lpo_no||'—')}</td>
         <td>${deliveryPill(r.delivery_status)}</td>
         <td class="pst-mono">${esc(r.do_no||'—')}</td>
         <td>${fmtDate(r.delivery_date)||'—'}</td>
@@ -1250,6 +1287,7 @@
         <td style="max-width:180px; white-space:pre-wrap;">${esc(r.remarks||'—')}</td>
         <td>${photoThumb(r.nameplate_photo_url)}</td>
         <td>${photoThumb(r.history_card_photo_url)}</td>
+        <td><button class="pst-icon-btn ov-store-jump" title="Open in Store Update" data-id="${r.id}">📦</button></td>
         ${session.role==='admin' ? `<td><button class="pst-icon-btn ov-delete" title="Delete record" data-id="${r.id}">🗑</button></td>` : ''}
       </tr>`).join('');
   }
@@ -1396,6 +1434,8 @@
     priority: r=> priorityRank(r.priority),
     requested_by: r=> (r.requested_by||'').toLowerCase(),
     approval: r=> (r.approval_status||'').toLowerCase(),
+    pr_no: r=> (r.pr_no||'').toLowerCase(),
+    lpo_no: r=> (r.lpo_no||'').toLowerCase(),
     delivery: r=> (r.delivery_status||'').toLowerCase(),
     do_no: r=> (r.do_no||'').toLowerCase(),
     delivery_date: r=> r.delivery_date || '',
@@ -1455,13 +1495,17 @@
       }
       prevBtn.disabled = ovPage<=1 || ovPageSize==='all';
       nextBtn.disabled = ovPage>=totalPages || ovPageSize==='all';
-      tbody.querySelectorAll('tr[data-id]').forEach(row=>{
-        row.style.cursor = 'pointer';
-        row.addEventListener('click', (e)=>{
-          if(e.target.closest('a, button')) return;
-          const id = row.dataset.id;
+      tbody.querySelectorAll('.ov-store-jump').forEach(btn=>{
+        btn.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          const id = btn.dataset.id;
           const r = requests.find(x=>x.id===id);
           if(r) openInStoreUpdate(r);
+        });
+      });
+      tbody.querySelectorAll('.ov-copy-serial').forEach(el=>{
+        el.addEventListener('click', ()=>{
+          copyToClipboard(el.dataset.copy, el);
         });
       });
       if(session.role==='admin'){
@@ -1546,7 +1590,7 @@
     render();
   }
   function exportCSV(){
-    const cols = ['id','request_date','site_project','machine','make','model','machine_serial','parts','quantity','priority','reason','requested_by','approval_status','approved_by','delivery_status','do_no','delivery_date','received_person','installation_status','remarks','nameplate_photo_url','history_card_photo_url'];
+    const cols = ['id','request_date','site_project','machine','make','model','machine_serial','parts','quantity','priority','reason','requested_by','approval_status','approved_by','pr_no','lpo_no','delivery_status','do_no','delivery_date','received_person','installation_status','remarks','nameplate_photo_url','history_card_photo_url'];
     const lines = [cols.join(',')];
     requests.forEach(r=>{
       lines.push(cols.map(c=>{
@@ -1902,7 +1946,97 @@
     }
   }
 
-  // ---------- ASSET MANAGEMENT ----------
+  // ---------- PROCUREMENT (Admin / customizable) ----------
+  async function procurementView(){
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Procurement</p>
+        <p class="pst-panel-desc">Record the Purchase Request No. and LPO No. raised in the Procurement ERP for each approved request, to complete the purchase cycle.</p>
+        <div class="pst-toolbar">
+          <input type="text" id="pr-search" placeholder="Search site, part, machine, requester…">
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft); white-space:nowrap;">
+            <input type="checkbox" id="pr-pending-only" checked> Show only pending procurement
+          </label>
+          <span class="pst-count" id="pr-count"></span>
+        </div>
+        <div id="pr-list"></div>
+      </div>`;
+  }
+  function procurementCard(r){
+    const done = !!(r.pr_no && r.pr_no.trim());
+    return `
+      <div class="pst-card" data-id="${r.id}">
+        <div class="pst-card-top">
+          <div>
+            <div class="pst-card-title">${esc(r.parts)} × ${esc(r.quantity)} <span class="pst-mono" style="color:var(--ink-soft); font-weight:400;">${reqSerial(r)}</span></div>
+            <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} · Req. by ${esc(r.requested_by)} · Approved by ${esc(r.approved_by||'—')}</div>
+          </div>
+          ${done ? '<span class="pill pill-green">PR Raised</span>' : '<span class="pill pill-gray">Pending</span>'}
+        </div>
+        <div style="margin-top:14px;">
+          <div class="pst-grid">
+            <div class="pst-field"><label>Purchase Request No.</label><input type="text" class="pr-prno" value="${esc(r.pr_no||'')}" placeholder="PR number from Procurement ERP"></div>
+            <div class="pst-field"><label>LPO No.</label><input type="text" class="pr-lpono" value="${esc(r.lpo_no||'')}" placeholder="LPO number, once raised"></div>
+          </div>
+          <div class="pst-btn-row">
+            <button class="pst-btn pst-btn-primary pr-save">Save</button>
+          </div>
+          <div class="pr-msg"></div>
+        </div>
+      </div>`;
+  }
+  function wireProcurement(){
+    const listEl = document.getElementById('pr-list');
+    const countEl = document.getElementById('pr-count');
+    const searchEl = document.getElementById('pr-search');
+    const pendingOnlyEl = document.getElementById('pr-pending-only');
+    function apply(){
+      const q = (searchEl.value||'').toLowerCase();
+      let approved = requests.filter(r=>statusEq(r.approval_status,'Approved'));
+      const totalApproved = approved.length;
+      if(pendingOnlyEl.checked){
+        approved = approved.filter(r=> !(r.pr_no && r.pr_no.trim()));
+      }
+      if(q){
+        approved = approved.filter(r=>{
+          const hay = [r.site_project,r.parts,r.machine,r.requested_by,r.make,r.model].join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+      }
+      if(!approved.length){
+        listEl.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">${pendingOnlyEl.checked ? 'Nothing pending' : 'Nothing here yet'}</div>${q ? 'No approved requests match your search.' : (pendingOnlyEl.checked ? 'Every approved request already has a Purchase Request No.' : 'Approved requests will appear here.')}</div>`;
+        countEl.textContent = '';
+        return;
+      }
+      listEl.innerHTML = approved.map(procurementCard).join('');
+      countEl.textContent = approved.length + ' of ' + totalApproved + ' approved requests';
+      wireProcurementCards();
+    }
+    searchEl.addEventListener('input', apply);
+    pendingOnlyEl.addEventListener('change', apply);
+    apply();
+  }
+  function wireProcurementCards(){
+    const list = document.getElementById('pr-list');
+    list.querySelectorAll('.pst-card').forEach(card=>{
+      const id = card.dataset.id;
+      const msgEl = card.querySelector('.pr-msg');
+      card.querySelector('.pr-save').addEventListener('click', async ()=>{
+        const payload = {
+          pr_no: card.querySelector('.pr-prno').value.trim(),
+          lpo_no: card.querySelector('.pr-lpono').value.trim()
+        };
+        try{
+          await sb(PARTS_TABLE+'?id=eq.'+id, {method:'PATCH', body:payload});
+          msgEl.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
+          Object.assign(requests.find(r=>r.id===id), payload);
+        }catch(e){
+          msgEl.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+        }
+      });
+    });
+  }
+
   const AS_SORT_COLUMNS = [
     {key:'site', label:'Site Name'},
     {key:'location', label:'Location'},
