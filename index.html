@@ -462,6 +462,12 @@
 
   // ---------- photo upload (Supabase Storage) ----------
   const PHOTO_BUCKET = "spare-parts-photos";
+  const PROCUREMENT_URL = "https://azzurro.u.frappe.cloud/app/material-request/";
+  function prNoLink(prNo){
+    if(!prNo || !prNo.trim()) return '—';
+    const href = PROCUREMENT_URL + encodeURIComponent(prNo.trim());
+    return `<a href="${esc(href)}" target="_blank" rel="noopener" class="pst-pr-link" title="Open in Procurement software">${esc(prNo)}</a>`;
+  }
   async function uploadPhoto(file, prefix){
     if(!file) return null;
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
@@ -1277,7 +1283,7 @@
         <td>${priorityPill(r.priority)}</td>
         <td>${esc(r.requested_by)}</td>
         <td>${approvalPill(r.approval_status)}</td>
-        <td class="pst-mono">${esc(r.pr_no||'—')}</td>
+        <td class="pst-mono">${prNoLink(r.pr_no)}</td>
         <td class="pst-mono">${esc(r.lpo_no||'—')}</td>
         <td>${deliveryPill(r.delivery_status)}</td>
         <td class="pst-mono">${esc(r.do_no||'—')}</td>
@@ -2003,6 +2009,7 @@
             <div class="pst-field"><label>Purchase Request No.</label><input type="text" class="pr-prno" value="${esc(r.pr_no||'')}" placeholder="PR number from Procurement ERP"></div>
             <div class="pst-field"><label>LPO No.</label><input type="text" class="pr-lpono" value="${esc(r.lpo_no||'')}" placeholder="LPO number, once raised"></div>
           </div>
+          ${done ? `<p style="margin:8px 0 0; font-size:12.5px;">${prNoLink(r.pr_no)} <span style="color:var(--ink-soft);">— click to open in Procurement software</span></p>` : ''}
           <div class="pst-btn-row">
             <button class="pst-btn pst-btn-primary pr-save">Save</button>
           </div>
