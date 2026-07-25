@@ -1837,21 +1837,31 @@
         <p class="pst-panel-desc">Update status once parts are ordered, delivered, received or installed.</p>
         <div class="pst-toolbar">
           <input type="text" id="st-search" placeholder="Search site, part, machine, requester…">
+          <select id="st-filter">
+            <option value="">All approved requests</option>
+            <option value="pending_delivery">Pending Delivery</option>
+            <option value="pending_installation">Pending Installation</option>
+          </select>
           <span class="pst-count" id="st-count"></span>
         </div>
+        <p style="font-size:12px; color:var(--ink-soft); margin:-4px 0 0;" id="st-stats"></p>
         <div id="st-list"></div>
       </div>`;
   }
   function storeCard(r){
+    const isDelivered = statusEq(r.delivery_status,'Delivered');
+    const isInstalled = statusEq(r.installation_status,'Installed');
+    const cardStyle = isInstalled ? 'border-color:#8fbf9f; background:#f2f9f4;' : '';
     return `
-      <div class="pst-card" data-id="${r.id}">
+      <div class="pst-card" data-id="${r.id}" style="${cardStyle}">
         <div class="pst-card-top st-toggle" style="cursor:pointer;">
           <div>
             <div class="pst-card-title">${esc(r.parts)} × ${esc(r.quantity)} <span class="pst-mono" style="color:var(--ink-soft); font-weight:400;">${reqSerial(r)}</span></div>
-            <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} · Req. by ${esc(r.requested_by)} · Approved by ${esc(r.approved_by||'—')}</div>
+            <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} · Req. by ${esc(r.requested_by)} on ${fmtDate(r.request_date)} · Approved by ${esc(r.approved_by||'—')}</div>
           </div>
           <div style="display:flex; align-items:center; gap:10px;">
             ${deliveryPill(r.delivery_status)}
+            ${isDelivered ? installPill(r.installation_status) : ''}
             <span class="st-caret" style="color:var(--ink-soft); font-size:11px; transition:transform .15s;">▸</span>
           </div>
         </div>
@@ -1883,9 +1893,23 @@
     const listEl = document.getElementById('st-list');
     const countEl = document.getElementById('st-count');
     const searchEl = document.getElementById('st-search');
+    const filterEl = document.getElementById('st-filter');
+    const statsEl = document.getElementById('st-stats');
+    function isPendingDelivery(r){
+      return !statusEq(r.delivery_status,'Delivered') && !statusEq(r.delivery_status,'Returned') && !statusEq(r.delivery_status,'Cancelled');
+    }
+    function isPendingInstallation(r){
+      return statusEq(r.delivery_status,'Delivered') && statusEq(r.installation_status,'Pending');
+    }
     function apply(){
       const q = (searchEl.value||'').toLowerCase();
-      let approved = requests.filter(r=>statusEq(r.approval_status,'Approved'));
+      const allApproved = requests.filter(r=>statusEq(r.approval_status,'Approved'));
+      const pendingDeliveryCount = allApproved.filter(isPendingDelivery).length;
+      const pendingInstallCount = allApproved.filter(isPendingInstallation).length;
+      statsEl.textContent = `${pendingDeliveryCount} pending delivery · ${pendingInstallCount} pending installation`;
+      let approved = allApproved;
+      if(filterEl.value==='pending_delivery') approved = approved.filter(isPendingDelivery);
+      else if(filterEl.value==='pending_installation') approved = approved.filter(isPendingInstallation);
       if(q){
         approved = approved.filter(r=>{
           const hay = [r.site_project,r.parts,r.machine,r.requested_by,r.make,r.model].join(' ').toLowerCase();
@@ -1893,15 +1917,16 @@
         });
       }
       if(!approved.length){
-        listEl.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">Nothing to fulfil yet</div>${q ? 'No approved requests match your search.' : 'Approved requests will appear here.'}</div>`;
+        listEl.innerHTML = `<div class="pst-empty"><div class="pst-empty-title">Nothing here</div>${q ? 'No approved requests match your search.' : 'Nothing matches this filter right now.'}</div>`;
         countEl.textContent = '';
         return;
       }
       listEl.innerHTML = approved.map(storeCard).join('');
-      countEl.textContent = approved.length + ' of ' + requests.filter(r=>statusEq(r.approval_status,'Approved')).length + ' requests';
+      countEl.textContent = approved.length + ' of ' + allApproved.length + ' requests';
       wireStoreCards();
     }
     searchEl.addEventListener('input', apply);
+    filterEl.addEventListener('change', apply);
     apply();
   }
   function wireStoreCards(){
@@ -1969,7 +1994,7 @@
         <div class="pst-card-top">
           <div>
             <div class="pst-card-title">${esc(r.parts)} × ${esc(r.quantity)} <span class="pst-mono" style="color:var(--ink-soft); font-weight:400;">${reqSerial(r)}</span></div>
-            <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} · Req. by ${esc(r.requested_by)} · Approved by ${esc(r.approved_by||'—')}</div>
+            <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} · Req. by ${esc(r.requested_by)} on ${fmtDate(r.request_date)} · Approved by ${esc(r.approved_by||'—')}</div>
           </div>
           ${done ? '<span class="pill pill-green">PR Raised</span>' : '<span class="pill pill-gray">Pending</span>'}
         </div>
