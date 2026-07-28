@@ -1611,6 +1611,48 @@
     a.click();
   }
 
+  function photoFieldHTML(label, prefix){
+    return `<div class="pst-field">
+      <label>${esc(label)}</label>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:2px;">
+        <button type="button" class="pst-btn pst-btn-ghost pst-photo-gallery-btn" data-prefix="${prefix}" style="padding:8px 14px; font-size:12.5px;">📁 Choose File</button>
+        <button type="button" class="pst-btn pst-btn-ghost pst-photo-camera-btn" data-prefix="${prefix}" style="padding:8px 14px; font-size:12.5px;">📷 Take Photo</button>
+        <span class="pst-photo-filename" id="${prefix}-filename" style="font-size:12px; color:var(--ink-soft);">No file selected</span>
+      </div>
+      <input type="file" id="${prefix}-gallery" accept="image/*" style="display:none;">
+      <input type="file" id="${prefix}-camera" accept="image/*" capture="environment" style="display:none;">
+    </div>`;
+  }
+  function wirePhotoField(prefix){
+    const galleryInput = document.getElementById(prefix+'-gallery');
+    const cameraInput = document.getElementById(prefix+'-camera');
+    const filenameEl = document.getElementById(prefix+'-filename');
+    const galleryBtn = document.querySelector(`.pst-photo-gallery-btn[data-prefix="${prefix}"]`);
+    const cameraBtn = document.querySelector(`.pst-photo-camera-btn[data-prefix="${prefix}"]`);
+    if(!galleryInput || !cameraInput) return;
+    galleryBtn.addEventListener('click', ()=> galleryInput.click());
+    cameraBtn.addEventListener('click', ()=> cameraInput.click());
+    galleryInput.addEventListener('change', ()=>{
+      if(galleryInput.files[0]){ cameraInput.value=''; filenameEl.textContent = galleryInput.files[0].name; }
+    });
+    cameraInput.addEventListener('change', ()=>{
+      if(cameraInput.files[0]){ galleryInput.value=''; filenameEl.textContent = cameraInput.files[0].name; }
+    });
+  }
+  function getPhotoFieldFile(prefix){
+    const galleryInput = document.getElementById(prefix+'-gallery');
+    const cameraInput = document.getElementById(prefix+'-camera');
+    return (cameraInput && cameraInput.files[0]) || (galleryInput && galleryInput.files[0]) || null;
+  }
+  function clearPhotoField(prefix){
+    const galleryInput = document.getElementById(prefix+'-gallery');
+    const cameraInput = document.getElementById(prefix+'-camera');
+    const filenameEl = document.getElementById(prefix+'-filename');
+    if(galleryInput) galleryInput.value = '';
+    if(cameraInput) cameraInput.value = '';
+    if(filenameEl) filenameEl.textContent = 'No file selected';
+  }
+
   // ---------- NEW REQUEST (Technician) ----------
   function requesterIdentity(){
     if(session && session.name && session.name.trim() && session.name!=='Guest') return session.name.trim();
@@ -1652,8 +1694,8 @@
           <div class="pst-field"><label>Parts</label><input type="text" id="rq-parts" placeholder="e.g. Oil filter"></div>
           <div class="pst-field"><label>Quantity</label><input type="number" id="rq-qty" min="1" value="1"></div>
           <div class="pst-field full"><label>Reason for Replacement</label><textarea id="rq-reason" placeholder="What happened / why it's needed"></textarea></div>
-          <div class="pst-field"><label>Machine Name Plate Photo</label><input type="file" id="rq-photo-nameplate" accept="image/*"></div>
-          <div class="pst-field"><label>History Card Photo</label><input type="file" id="rq-photo-history" accept="image/*"></div>
+          ${photoFieldHTML('Machine Name Plate Photo', 'rq-photo-nameplate')}
+          ${photoFieldHTML('History Card Photo', 'rq-photo-history')}
         </div>
         <div class="pst-btn-row">
           <button class="pst-btn pst-btn-primary" id="rq-submit">Submit Request</button>
@@ -1663,6 +1705,8 @@
       </div>`;
   }
   function wireRequest(){
+    wirePhotoField('rq-photo-nameplate');
+    wirePhotoField('rq-photo-history');
     document.getElementById('rq-clear').addEventListener('click', ()=>{
       const msg = document.getElementById('rq-msg');
       if(!confirm('Clear all fields in this form?')) return;
@@ -1677,8 +1721,8 @@
       document.getElementById('rq-parts').value = '';
       document.getElementById('rq-qty').value = '1';
       document.getElementById('rq-reason').value = '';
-      document.getElementById('rq-photo-nameplate').value = '';
-      document.getElementById('rq-photo-history').value = '';
+      clearPhotoField('rq-photo-nameplate');
+      clearPhotoField('rq-photo-history');
       msg.innerHTML = '';
     });
     document.getElementById('rq-submit').addEventListener('click', async ()=>{
@@ -1691,8 +1735,8 @@
         msg.innerHTML = '<div class="pst-msg pst-msg-err">Please fill in at least Site/Project and Parts. (Requested By could not be determined — make sure your account has a name or email set.)</div>';
         return;
       }
-      const nameplateFile = document.getElementById('rq-photo-nameplate').files[0] || null;
-      const historyFile = document.getElementById('rq-photo-history').files[0] || null;
+      const nameplateFile = getPhotoFieldFile('rq-photo-nameplate');
+      const historyFile = getPhotoFieldFile('rq-photo-history');
 
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting…';
@@ -1728,8 +1772,8 @@
         msg.innerHTML = '<div class="pst-msg pst-msg-ok">Request submitted. It now shows up in the approval queue.</div>';
         document.getElementById('rq-parts').value='';
         document.getElementById('rq-reason').value='';
-        document.getElementById('rq-photo-nameplate').value='';
-        document.getElementById('rq-photo-history').value='';
+        clearPhotoField('rq-photo-nameplate');
+        clearPhotoField('rq-photo-history');
       }catch(e){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">Could not submit: ${esc(e.message)}</div>`;
       }finally{
@@ -2281,8 +2325,8 @@
           <div class="pst-field"><label>Year of Installation</label><input type="number" id="as-add-year" min="1980" max="2100" placeholder="e.g. 2023"></div>
           <div class="pst-field"><label>Date of Last Service</label><input type="date" id="as-add-lastservice"></div>
           <div class="pst-field"><label>Technician Name</label><input type="text" id="as-add-tech" value="${esc(name)}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
-          <div class="pst-field"><label>Machine Photo</label><input type="file" id="as-add-photo-machine" accept="image/*"></div>
-          <div class="pst-field"><label>Name Plate Photo</label><input type="file" id="as-add-photo-nameplate" accept="image/*"></div>
+          ${photoFieldHTML('Machine Photo', 'as-add-photo-machine')}
+          ${photoFieldHTML('Name Plate Photo', 'as-add-photo-nameplate')}
         </div>
         <div class="pst-btn-row">
           <button class="pst-btn pst-btn-primary" id="as-add-submit">Submit Asset</button>
@@ -2292,6 +2336,8 @@
       </div>`;
   }
   function wireAssetAdd(){
+    wirePhotoField('as-add-photo-machine');
+    wirePhotoField('as-add-photo-nameplate');
     document.getElementById('as-add-clear').addEventListener('click', ()=>{
       const msg = document.getElementById('as-add-msg');
       if(!confirm('Clear all fields in this form?')) return;
@@ -2303,8 +2349,8 @@
       document.getElementById('as-add-serial').value = '';
       document.getElementById('as-add-year').value = '';
       document.getElementById('as-add-lastservice').value = '';
-      document.getElementById('as-add-photo-machine').value = '';
-      document.getElementById('as-add-photo-nameplate').value = '';
+      clearPhotoField('as-add-photo-machine');
+      clearPhotoField('as-add-photo-nameplate');
       msg.innerHTML = '';
     });
     document.getElementById('as-add-submit').addEventListener('click', async ()=>{
@@ -2318,8 +2364,8 @@
         msg.innerHTML = '<div class="pst-msg pst-msg-err">Please fill in at least Site Name, Machine Name and Serial No.</div>';
         return;
       }
-      const machineFile = document.getElementById('as-add-photo-machine').files[0] || null;
-      const nameplateFile = document.getElementById('as-add-photo-nameplate').files[0] || null;
+      const machineFile = getPhotoFieldFile('as-add-photo-machine');
+      const nameplateFile = getPhotoFieldFile('as-add-photo-nameplate');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting…';
       msg.innerHTML = '';
@@ -2355,8 +2401,8 @@
         document.getElementById('as-add-serial').value = '';
         document.getElementById('as-add-year').value = '';
         document.getElementById('as-add-lastservice').value = '';
-        document.getElementById('as-add-photo-machine').value = '';
-        document.getElementById('as-add-photo-nameplate').value = '';
+        clearPhotoField('as-add-photo-machine');
+        clearPhotoField('as-add-photo-nameplate');
       }catch(e){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">Could not submit: ${esc(e.message)}</div>`;
       }finally{
