@@ -46,11 +46,11 @@
   .pst-banner button{font-family:'Inter',sans-serif; font-weight:600; font-size:12px; background:var(--amber); color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; white-space:nowrap;}
 
   .pst-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
-  .pst-field{display:flex; flex-direction:column; gap:4px;}
+  .pst-field{display:flex; flex-direction:column; gap:4px; min-width:0;}
   .pst-field.full{grid-column:1/-1;}
   .pst-field label{font-size:11.5px; font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;}
   .pst-field input, .pst-field select, .pst-field textarea{
-    font-family:'Inter',sans-serif; font-size:13.5px; padding:8px 10px; border:1px solid var(--line); border-radius:5px; background:#fcfcfc; color:var(--ink);
+    font-family:'Inter',sans-serif; font-size:13.5px; padding:8px 10px; border:1px solid var(--line); border-radius:5px; background:#fcfcfc; color:var(--ink); width:100%; max-width:100%; box-sizing:border-box;
   }
   .pst-field input:focus, .pst-field select:focus, .pst-field textarea:focus{outline:2px solid var(--accent); outline-offset:0; border-color:var(--accent); background:#fff;}
   .pst-field textarea{resize:vertical; min-height:56px; font-family:'Inter',sans-serif;}
