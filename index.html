@@ -42,7 +42,7 @@
   .pst-panel-title{font-family:'Oswald',sans-serif; font-size:16px; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 4px;}
   .pst-panel-desc{color:var(--ink-soft); font-size:12.5px; margin:0 0 16px;}
 
-  .pst-banner{background:var(--amber-soft); border:1px solid var(--amber); color:var(--amber); padding:12px 16px; border-radius:var(--radius); font-size:13px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px;}
+  .pst-banner{background:var(--amber-soft); border:1px solid var(--amber); color:var(--amber); padding:12px 16px; border-radius:var(--radius); font-size:13px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;}
   .pst-banner button{font-family:'Inter',sans-serif; font-weight:600; font-size:12px; background:var(--amber); color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; white-space:nowrap;}
 
   .pst-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
@@ -65,7 +65,7 @@
   .pst-btn-row{display:flex; gap:8px; margin-top:14px;}
 
   .pst-toolbar{display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; align-items:center;}
-  .pst-toolbar input, .pst-toolbar select{font-family:'Inter',sans-serif; font-size:13px; padding:7px 10px; border:1px solid var(--line); border-radius:5px; background:#fff;}
+  .pst-toolbar input:not([type="checkbox"]):not([type="radio"]), .pst-toolbar select{font-family:'Inter',sans-serif; font-size:13px; padding:7px 10px; border:1px solid var(--line); border-radius:5px; background:#fff;}
   .pst-toolbar input[type=text]{flex:1; min-width:160px;}
   .pst-count{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); margin-left:auto;}
 
@@ -144,10 +144,17 @@
     .pst-panel{padding:14px;}
     .pst-table-scroll{max-height:60vh;}
     .pst-toolbar{flex-direction:column; align-items:stretch;}
-    .pst-toolbar input, .pst-toolbar select, .pst-toolbar button{width:100%;}
+    .pst-toolbar input:not([type="checkbox"]):not([type="radio"]), .pst-toolbar select, .pst-toolbar button{width:100%;}
+    .pst-toolbar label{width:100%;}
     .pst-count{margin-left:0; text-align:right;}
     .pst-field input, .pst-field select, .pst-field textarea{font-size:16px; padding:10px;}
     .pst-btn{padding:11px 18px; width:100%;}
+    .pst-btn-sm{width:auto !important; padding:6px 12px !important; font-size:12px !important;}
+    .pst-inline-add-row{flex-direction:column; align-items:stretch;}
+    .pst-pagination-bar{flex-direction:row; flex-wrap:wrap;}
+    .pst-pagination-bar #ov-prev, .pst-pagination-bar #ov-next{width:auto; flex:1;}
+    .pst-pagination-bar #ov-page-label{width:100%; order:3; text-align:center;}
+    .pst-pagination-bar #ov-pagesize{width:100%; order:4;}
     .pst-btn-row{flex-direction:column;}
     .pst-card-top{flex-direction:column;}
   }
@@ -936,7 +943,7 @@
         <div id="site-import-msg"></div>
         <div class="pst-field full" style="margin-top:18px; border-top:1px solid var(--line); padding-top:14px;">
           <label>Add a Single Site</label>
-          <div style="display:flex; gap:8px;">
+          <div class="pst-inline-add-row" style="display:flex; gap:8px;">
             <input type="text" id="site-single-name" placeholder="e.g. Site C – Main Campus" style="flex:1;">
             <button class="pst-btn pst-btn-primary" id="site-single-add" style="flex-shrink:0;">Add</button>
           </div>
@@ -952,6 +959,7 @@
       <div class="pst-panel">
         <p class="pst-panel-title">Manage Users &amp; Privileges</p>
         <p class="pst-panel-desc">Everyone who has signed up shows up here. Assign each person a role — new sign-ups start as "Pending" (Guest-level access) until you do. The "Legacy Admin" column reflects your existing <span class="pst-mono">is_admin</span> flag — anyone with it set also gets full admin access here automatically, even without a role assigned.</p>
+        <div style="overflow-x:auto;">
         <table class="pst-userlist">
           <thead><tr><th>Name</th><th>Email</th><th>Legacy Admin</th><th>Role</th><th></th><th>Tabs</th><th></th></tr></thead>
           <tbody id="adm-user-rows">
@@ -968,8 +976,8 @@
                   <option value="" ${!u.role?'selected':''}>Pending</option>
                   ${['technician','approver','admin'].map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('')}
                 </select></td>
-                <td><button class="pst-btn pst-btn-ghost au-save" style="padding:6px 12px; font-size:12px;">Save</button></td>
-                <td><button class="pst-btn pst-btn-ghost au-tabs-toggle" style="padding:6px 12px; font-size:12px;">${isCustom?'Custom':'Default'}</button></td>
+                <td><button class="pst-btn pst-btn-ghost pst-btn-sm au-save" style="padding:6px 12px; font-size:12px;">Save</button></td>
+                <td><button class="pst-btn pst-btn-ghost pst-btn-sm au-tabs-toggle" style="padding:6px 12px; font-size:12px;">${isCustom?'Custom':'Default'}</button></td>
                 <td><button class="pst-icon-btn au-delete" title="Delete user" data-id="${u.id}" data-name="${esc(u.name||u.email||'this user')}">🗑</button></td>
               </tr>
               <tr class="au-tabs-row" data-id="${u.id}" style="display:none;">
@@ -983,7 +991,7 @@
                       ${ALL_TABS.map(([key,label])=>`<label style="display:flex; align-items:center; gap:6px; font-size:12.5px;"><input type="checkbox" class="au-tab-checkbox" value="${key}" ${effectiveKeys.includes(key)?'checked':''}> ${esc(label)}</label>`).join('')}
                     </div>
                     <div class="pst-btn-row" style="margin-top:0;">
-                      <button class="pst-btn pst-btn-primary au-tabs-save" style="padding:6px 12px; font-size:12px;">Save Tabs</button>
+                      <button class="pst-btn pst-btn-primary pst-btn-sm au-tabs-save" style="padding:6px 12px; font-size:12px;">Save Tabs</button>
                     </div>
                     <div class="au-tabs-msg"></div>
                   </div>
@@ -992,6 +1000,7 @@
             }).join('')}
           </tbody>
         </table>
+        </div>
         <p class="pst-panel-desc" style="margin-top:10px; margin-bottom:0;">Deleting a user permanently removes their login account and profile — they'll need to sign up again from scratch to regain access. This requires the <span class="pst-mono">delete-user</span> Edge Function to be deployed on your Supabase project (see setup notes). Per-user tab assignment requires an <span class="pst-mono">allowed_tabs</span> column (type <span class="pst-mono">jsonb</span> or <span class="pst-mono">text[]</span>) on the <span class="pst-mono">profiles</span> table — if saving a custom tab list fails, that column likely needs to be added.</p>
         <div id="adm-list-msg"></div>
       </div>`;
@@ -1257,7 +1266,7 @@
           <tbody id="ov-tbody"></tbody>
         </table>
         </div>
-        <div class="pst-toolbar" style="margin-top:12px; border-top:1px solid var(--line); padding-top:12px;">
+        <div class="pst-toolbar pst-pagination-bar" style="margin-top:12px; border-top:1px solid var(--line); padding-top:12px;">
           <button class="pst-btn pst-btn-ghost" id="ov-prev">‹ Prev</button>
           <span class="pst-count" id="ov-page-label"></span>
           <button class="pst-btn pst-btn-ghost" id="ov-next">Next ›</button>
@@ -1617,7 +1626,7 @@
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:2px;">
         <button type="button" class="pst-btn pst-btn-ghost pst-photo-gallery-btn" data-prefix="${prefix}" style="padding:8px 14px; font-size:12.5px;">📁 Choose File</button>
         <button type="button" class="pst-btn pst-btn-ghost pst-photo-camera-btn" data-prefix="${prefix}" style="padding:8px 14px; font-size:12.5px;">📷 Take Photo</button>
-        <span class="pst-photo-filename" id="${prefix}-filename" style="font-size:12px; color:var(--ink-soft);">No file selected</span>
+        <span class="pst-photo-filename" id="${prefix}-filename" style="font-size:12px; color:var(--ink-soft); word-break:break-all; max-width:100%;">No file selected</span>
       </div>
       <input type="file" id="${prefix}-gallery" accept="image/*" style="display:none;">
       <input type="file" id="${prefix}-camera" accept="image/*" capture="environment" style="display:none;">
@@ -1909,7 +1918,7 @@
             <div class="pst-card-title">${esc(r.parts)} × ${esc(r.quantity)} <span class="pst-mono" style="color:var(--ink-soft); font-weight:400;">${reqSerial(r)}</span></div>
             <div class="pst-card-meta">${esc(r.site_project)} · ${esc(r.machine)} · Req. by ${esc(r.requested_by)} on ${fmtDate(r.request_date)} · Approved by ${esc(r.approved_by||'—')}</div>
           </div>
-          <div style="display:flex; align-items:center; gap:10px;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             ${deliveryPill(r.delivery_status)}
             ${isDelivered ? installPill(r.installation_status) : ''}
             <span class="st-caret" style="color:var(--ink-soft); font-size:11px; transition:transform .15s;">▸</span>
@@ -2029,7 +2038,7 @@
         <p class="pst-panel-desc">Record the Purchase Request No. and LPO No. raised in the Procurement ERP for each approved request, to complete the purchase cycle.</p>
         <div class="pst-toolbar">
           <input type="text" id="pr-search" placeholder="Search site, part, machine, requester…">
-          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft); white-space:nowrap;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft);">
             <input type="checkbox" id="pr-pending-only" checked> Show only pending procurement
           </label>
           <span class="pst-count" id="pr-count"></span>
