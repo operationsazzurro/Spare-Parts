@@ -1547,7 +1547,10 @@
         ['Approval Status', r.approval_status || 'Pending']
       ];
       const colW = (pageW - margin*2 - 10) / 2;
-      const valueLineH = 5.2;
+      const valueLineH = 5.2; // vertical space per wrapped value line
+      const labelToValueGap = 6; // label baseline -> first value line baseline
+      const valueToDividerGap = 3; // last value line -> divider line
+      const dividerToNextRowGap = 5; // divider line -> next row's label (this is what was too tight before)
       doc.setFont('helvetica','normal');
       doc.setFontSize(11.5);
       const wrapped = fields.map(f=>({
@@ -1558,7 +1561,8 @@
         const left = wrapped[i];
         const right = wrapped[i+1];
         const rowLines = Math.max(left.lines.length, right ? right.lines.length : 0);
-        const rowH = 6 + rowLines * valueLineH + 3; // label + wrapped value lines + spacing before divider
+        const dividerY = labelToValueGap + (rowLines - 1) * valueLineH + valueToDividerGap;
+        const rowH = dividerY + dividerToNextRowGap;
 
         [[left, margin], right ? [right, margin + colW + 10] : null].forEach(pair=>{
           if(!pair) return;
@@ -1570,10 +1574,10 @@
           doc.setFont('helvetica','normal');
           doc.setFontSize(11.5);
           doc.setTextColor(27,42,56);
-          doc.text(field.lines, x, y + 6);
+          doc.text(field.lines, x, y + labelToValueGap);
           doc.setDrawColor(217,222,225);
           doc.setLineWidth(0.3);
-          doc.line(x, y + rowH - 1, x + colW, y + rowH - 1);
+          doc.line(x, y + dividerY, x + colW, y + dividerY);
         });
 
         y += rowH;
