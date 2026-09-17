@@ -912,18 +912,27 @@
     const users = await sb('profiles?select=*&order=role.asc.nullsfirst,name.asc') || [];
     await loadSites();
     const notifSettingsRows = await sb('notification_settings?id=eq.1').catch(()=>[]) || [];
-    const notifSettings = notifSettingsRows[0] || {cutoff_date:'', recipient_emails:[]};
+    const notifSettings = notifSettingsRows[0] || {cutoff_date:'', recipient_emails:[], pr_recipient_emails:[]};
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Email Notifications</p>
-        <p class="pst-panel-desc">Once a day, if there's at least one spare part request still "Pending" approval that was requested after the cutoff date below, an email is sent to the recipients listed. If nothing matches, no email is sent. Requires a one-time setup (Resend account + a daily schedule) — see the setup notes shared with this feature.</p>
+        <p class="pst-panel-desc">Two independent daily checks, each emailing its own recipient list only when something matches — if nothing matches, no email is sent for that check. Both link back to the app. Requires a one-time setup (Gmail App Password + a daily schedule) — see the setup notes shared with this feature.</p>
+
+        <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:6px 0 10px;">1. Spare parts requests - Approval Pending</p>
         <div class="pst-grid">
           <div class="pst-field"><label>Flag requests pending after this date</label><input type="date" id="notif-cutoff" value="${esc(notifSettings.cutoff_date||'')}"></div>
           <div class="pst-field full"><label>Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-recipients" placeholder="approver1@company.com&#10;approver2@company.com" style="min-height:80px;">${esc((notifSettings.recipient_emails||[]).join('\n'))}</textarea></div>
         </div>
+
+        <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:20px 0 10px; border-top:1px solid var(--line); padding-top:16px;">2. Pending Spare Parts request to raise</p>
+        <p class="pst-panel-desc" style="margin-top:0;">Requests that are Approved but still have no Purchase Request No. entered.</p>
+        <div class="pst-grid">
+          <div class="pst-field full"><label>PR Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-pr-recipients" placeholder="procurement1@company.com&#10;procurement2@company.com" style="min-height:80px;">${esc((notifSettings.pr_recipient_emails||[]).join('\n'))}</textarea></div>
+        </div>
+
         <div class="pst-btn-row">
           <button class="pst-btn pst-btn-primary" id="notif-save">Save Settings</button>
-          <button class="pst-btn pst-btn-ghost" id="notif-test">Send Test Email Now</button>
+          <button class="pst-btn pst-btn-ghost" id="notif-test">Send Test Emails Now</button>
         </div>
         <div id="notif-msg"></div>
       </div>
@@ -1042,8 +1051,10 @@
       const cutoff = document.getElementById('notif-cutoff').value || null;
       const recipients = document.getElementById('notif-recipients').value
         .split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
+      const prRecipients = document.getElementById('notif-pr-recipients').value
+        .split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
       try{
-        await sb('notification_settings?id=eq.1', {method:'PATCH', body:{cutoff_date: cutoff, recipient_emails: recipients}});
+        await sb('notification_settings?id=eq.1', {method:'PATCH', body:{cutoff_date: cutoff, recipient_emails: recipients, pr_recipient_emails: prRecipients}});
         msg.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
       }catch(e){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
@@ -1056,11 +1067,14 @@
       msg.innerHTML = '<div class="pst-msg pst-msg-ok">Checking and sending, if applicable…</div>';
       try{
         const result = await callNotificationFunction();
-        if(result.sent){
-          msg.innerHTML = `<div class="pst-msg pst-msg-ok">Email sent — ${result.count} pending request(s) included.</div>`;
-        }else{
-          msg.innerHTML = `<div class="pst-msg pst-msg-ok">No email sent: ${esc(result.reason||'nothing matched.')}</div>`;
-        }
+        const labels = {approval_pending: 'Approval Pending', pr_pending: 'PR No. Pending'};
+        const lines = (result.results||[]).map(r=>{
+          const label = labels[r.type] || r.type;
+          if(r.sent) return `${label}: sent — ${r.count} request(s) included.`;
+          if(r.error) return `${label}: error — ${r.error}`;
+          return `${label}: no email sent (${r.reason||'nothing matched'}).`;
+        });
+        msg.innerHTML = `<div class="pst-msg pst-msg-ok">${lines.map(esc).join('<br>')}</div>`;
       }catch(e){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
       }finally{
