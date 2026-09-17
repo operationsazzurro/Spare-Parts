@@ -1534,7 +1534,7 @@
       doc.line(margin, y, pageW - margin, y);
       y += 10;
 
-      // ---- Field grid ----
+      // ---- Field grid (word-wrapped, dynamic row heights so long values never overlap) ----
       const fields = [
         ['Request Date', fmtDate(r.request_date) || '—'],
         ['Request Serial No.', reqSerial(r)],
@@ -1547,25 +1547,38 @@
         ['Approval Status', r.approval_status || 'Pending']
       ];
       const colW = (pageW - margin*2 - 10) / 2;
-      const rowH = 14;
-      fields.forEach((f, i)=>{
-        const col = i % 2;
-        const row = Math.floor(i / 2);
-        const x = margin + col * (colW + 10);
-        const fy = y + row * rowH;
-        doc.setFont('helvetica','bold');
-        doc.setFontSize(8);
-        doc.setTextColor(90,107,120);
-        doc.text(f[0].toUpperCase(), x, fy);
-        doc.setFont('helvetica','normal');
-        doc.setFontSize(11.5);
-        doc.setTextColor(27,42,56);
-        doc.text(String(f[1]), x, fy + 6);
-        doc.setDrawColor(217,222,225);
-        doc.setLineWidth(0.3);
-        doc.line(x, fy + 9, x + colW, fy + 9);
-      });
-      y += Math.ceil(fields.length/2) * rowH + 8;
+      const valueLineH = 5.2;
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(11.5);
+      const wrapped = fields.map(f=>({
+        label: f[0],
+        lines: doc.splitTextToSize(String(f[1]), colW - 1)
+      }));
+      for(let i=0; i<wrapped.length; i+=2){
+        const left = wrapped[i];
+        const right = wrapped[i+1];
+        const rowLines = Math.max(left.lines.length, right ? right.lines.length : 0);
+        const rowH = 6 + rowLines * valueLineH + 3; // label + wrapped value lines + spacing before divider
+
+        [[left, margin], right ? [right, margin + colW + 10] : null].forEach(pair=>{
+          if(!pair) return;
+          const [field, x] = pair;
+          doc.setFont('helvetica','bold');
+          doc.setFontSize(8);
+          doc.setTextColor(90,107,120);
+          doc.text(field.label.toUpperCase(), x, y);
+          doc.setFont('helvetica','normal');
+          doc.setFontSize(11.5);
+          doc.setTextColor(27,42,56);
+          doc.text(field.lines, x, y + 6);
+          doc.setDrawColor(217,222,225);
+          doc.setLineWidth(0.3);
+          doc.line(x, y + rowH - 1, x + colW, y + rowH - 1);
+        });
+
+        y += rowH;
+      }
+      y += 8;
 
       // ---- Photos: two squares, side by side, no headers/labels ----
       const [nameplateData, historyData] = await Promise.all([
