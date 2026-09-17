@@ -215,7 +215,8 @@
     approver:    [['overview','Overview'],['approve','Approvals']],
     admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
   };
-  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']];
+  const NAV_TAB_KEYS = new Set(['overview','request','approve','store','procurement','admin','asset_view','asset_add']);
+  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset'],['pdf_generate','Generate Request PDF (Overview)']];
   const ROLE_LABEL = {guest:'Guest', unassigned:'Pending', technician:'Technician', approver:'Approver', admin:'Admin'};
 
   const root = document.getElementById('pst-root');
@@ -226,11 +227,21 @@
   const gearBtn = document.getElementById('pst-gear');
 
   function tabsForSession(){
+    let tabs;
     if(session && Array.isArray(session.allowedTabs) && session.allowedTabs.length){
-      const tabs = ALL_TABS.filter(([key])=> session.allowedTabs.includes(key));
-      return tabs.length ? tabs : TAB_ACCESS[session.role] || [];
+      tabs = ALL_TABS.filter(([key])=> session.allowedTabs.includes(key));
+      if(!tabs.length) tabs = TAB_ACCESS[session.role] || [];
+    }else{
+      tabs = TAB_ACCESS[session.role] || [];
     }
-    return TAB_ACCESS[session.role] || [];
+    return tabs.filter(([key])=> NAV_TAB_KEYS.has(key));
+  }
+  function canGeneratePdf(){
+    if(!session) return false;
+    if(Array.isArray(session.allowedTabs) && session.allowedTabs.length){
+      return session.allowedTabs.includes('pdf_generate');
+    }
+    return session.role === 'admin';
   }
   function renderTabsBar(){
     if(!session){ tabsEl.innerHTML=''; tabsEl.style.display='none'; return; }
@@ -1337,7 +1348,7 @@
         <div class="pst-table-scroll">
         <table class="pst-table">
           <thead><tr id="ov-thead">
-            ${headCells}<th>Name Plate</th><th>History Card</th><th></th><th></th>${session.role==='admin' ? '<th></th>' : ''}
+            ${headCells}<th>Name Plate</th><th>History Card</th><th></th>${canGeneratePdf() ? '<th></th>' : ''}${session.role==='admin' ? '<th></th>' : ''}
           </tr></thead>
           <tbody id="ov-tbody"></tbody>
         </table>
@@ -1356,6 +1367,7 @@
       </div>`;
   }
   function ovRows(list){
+    const showPdfCol = canGeneratePdf();
     if(!list.length) return `<tr><td colspan="22" class="pst-empty">No matching requests.</td></tr>`;
     return list.map(r=>`
       <tr data-id="${r.id}">
@@ -1379,7 +1391,7 @@
         <td>${photoThumb(r.nameplate_photo_url)}</td>
         <td>${photoThumb(r.history_card_photo_url)}</td>
         <td><button class="pst-icon-btn ov-store-jump" title="Open in Store Update" data-id="${r.id}">📦</button></td>
-        <td><button class="pst-icon-btn ov-pdf" title="Generate Request PDF" data-id="${r.id}">📄</button></td>
+        ${showPdfCol ? `<td>${statusEq(r.approval_status,'Approved') ? `<button class="pst-icon-btn ov-pdf" title="Generate Request PDF" data-id="${r.id}">📄</button>` : ''}</td>` : ''}
         ${session.role==='admin' ? `<td><button class="pst-icon-btn ov-delete" title="Delete record" data-id="${r.id}">🗑</button></td>` : ''}
       </tr>`).join('');
   }
