@@ -477,6 +477,15 @@
       sites = [];
     }
   }
+  let notificationCutoffDate = null;
+  async function loadNotificationCutoffDate(){
+    try{
+      const rows = await sb('notification_settings?id=eq.1&select=cutoff_date') || [];
+      notificationCutoffDate = rows[0] ? rows[0].cutoff_date : null;
+    }catch(e){
+      notificationCutoffDate = null;
+    }
+  }
 
   // ---------- photo upload (Supabase Storage) ----------
   const PHOTO_BUCKET = "spare-parts-photos";
@@ -2300,10 +2309,14 @@
 
   // ---------- PROCUREMENT (Admin / customizable) ----------
   async function procurementView(){
+    await loadNotificationCutoffDate();
+    const cutoffNote = notificationCutoffDate
+      ? ` Showing requests dated after <b>${esc(fmtDate(notificationCutoffDate))}</b> (same cutoff used for email reminders).`
+      : '';
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Procurement</p>
-        <p class="pst-panel-desc">Record the Purchase Request No. and LPO No. raised in the Procurement ERP for each approved request, to complete the purchase cycle.</p>
+        <p class="pst-panel-desc">Record the Purchase Request No. and LPO No. raised in the Procurement ERP for each approved request, to complete the purchase cycle.${cutoffNote}</p>
         <div class="pst-toolbar">
           <input type="text" id="pr-search" placeholder="Search serial no., site, part, machine, requester…">
           <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft);">
@@ -2346,6 +2359,9 @@
     function apply(){
       const q = (searchEl.value||'').toLowerCase();
       let approved = requests.filter(r=>statusEq(r.approval_status,'Approved'));
+      if(notificationCutoffDate){
+        approved = approved.filter(r=> r.request_date && r.request_date > notificationCutoffDate);
+      }
       const totalApproved = approved.length;
       if(pendingOnlyEl.checked){
         approved = approved.filter(r=> !(r.pr_no && r.pr_no.trim()));
