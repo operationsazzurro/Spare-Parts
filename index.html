@@ -18,6 +18,8 @@
   .pst-gear:hover{color:#fff; border-color:var(--accent);}
   .pst-logo{position:absolute; top:20px; right:66px; height:28px; width:auto;}
   .pst-whoami{font-family:'Inter',sans-serif; font-size:12px; color:#a9bccb; margin-top:10px; display:flex; align-items:center; gap:8px;}
+  .pst-logout-btn{font-family:'Inter',sans-serif; font-size:11.5px; font-weight:600; color:#a9bccb; background:#243444; border:1px solid #445a6b; border-radius:5px; padding:4px 10px; cursor:pointer; transition:all .15s;}
+  .pst-logout-btn:hover{color:#fff; border-color:var(--accent);}
   .pst-whoami b{color:#fff;}
   .pst-whoami button{font-family:'Inter',sans-serif; font-size:11.5px; font-weight:600; background:none; border:1px solid #445a6b; color:#a9bccb; padding:3px 9px; border-radius:12px; cursor:pointer;}
   .pst-whoami button:hover{color:#fff; border-color:var(--accent);}
@@ -261,12 +263,14 @@
   }
   function renderWhoami(){
     if(!session){ whoamiEl.innerHTML=''; ladderEl.style.display='none'; return; }
-    whoamiEl.innerHTML = `Logged in as <b>${esc(session.name)}</b> · ${ROLE_LABEL[session.role]} <button id="pst-logout">Switch user</button>`;
+    whoamiEl.innerHTML = `Logged in as <b>${esc(session.name)}</b> · ${ROLE_LABEL[session.role]} <button id="pst-logout" class="pst-logout-btn">Log Out</button>`;
     ladderEl.style.display='flex';
-    document.getElementById('pst-logout').addEventListener('click', logout);
+    document.getElementById('pst-logout').addEventListener('click', ()=>{
+      if(confirm('Log out of Spare Parts Desk?')) logout();
+    });
   }
-  function logout(){
-    signOutAuth();
+  async function logout(){
+    await signOutAuth();
     session = null;
     currentTab = 'overview';
     renderWhoami();
@@ -933,33 +937,37 @@
     const users = await sb('profiles?select=*&order=role.asc.nullsfirst,name.asc') || [];
     await loadSites();
     const notifSettingsRows = await sb('notification_settings?id=eq.1').catch(()=>[]) || [];
-    const notifSettings = notifSettingsRows[0] || {cutoff_date:'', recipient_emails:[], pr_recipient_emails:[], delivery_recipient_emails:[]};
+    const notifSettings = notifSettingsRows[0] || {cutoff_date:'', recipient_emails:[], pr_recipient_emails:[], delivery_recipient_emails:[], recipient_whatsapp:[], pr_recipient_whatsapp:[], delivery_recipient_whatsapp:[]};
     return `
       <div class="pst-panel">
-        <p class="pst-panel-title">Email Notifications</p>
-        <p class="pst-panel-desc">Three independent daily checks, each emailing its own recipient list only when something matches — if nothing matches, no email is sent for that check. All link back to the app. Requires a one-time setup (Gmail App Password + a daily schedule) — see the setup notes shared with this feature.</p>
+        <p class="pst-panel-title">Notifications (Email &amp; WhatsApp)</p>
+        <p class="pst-panel-desc">Three independent daily checks, each sending via whichever channels have recipients filled in below — leave a field blank to skip that channel. Nothing is sent at all if nothing matches. Requires a one-time setup (Gmail App Password for email, Twilio for WhatsApp, + a daily schedule) — see the setup notes shared with this feature.</p>
 
         <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:6px 0 10px;">1. Spare parts requests - Approval Pending</p>
         <div class="pst-grid">
           <div class="pst-field"><label>Flag requests pending after this date</label><input type="date" id="notif-cutoff" value="${esc(notifSettings.cutoff_date||'')}"></div>
-          <div class="pst-field full"><label>Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-recipients" placeholder="approver1@company.com&#10;approver2@company.com" style="min-height:80px;">${esc((notifSettings.recipient_emails||[]).join('\n'))}</textarea></div>
+          <div class="pst-field"></div>
+          <div class="pst-field"><label>Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-recipients" placeholder="approver1@company.com&#10;approver2@company.com" style="min-height:80px;">${esc((notifSettings.recipient_emails||[]).join('\n'))}</textarea></div>
+          <div class="pst-field"><label>Recipient WhatsApp Numbers (E.164 format, one per line)</label><textarea id="notif-recipients-wa" placeholder="+971501234567&#10;+971509876543" style="min-height:80px;">${esc((notifSettings.recipient_whatsapp||[]).join('\n'))}</textarea></div>
         </div>
 
         <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:20px 0 10px; border-top:1px solid var(--line); padding-top:16px;">2. Pending Spare Parts request to raise</p>
         <p class="pst-panel-desc" style="margin-top:0;">Requests that are Approved but still have no Purchase Request No. entered. Uses the same cutoff date set above.</p>
         <div class="pst-grid">
-          <div class="pst-field full"><label>PR Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-pr-recipients" placeholder="procurement1@company.com&#10;procurement2@company.com" style="min-height:80px;">${esc((notifSettings.pr_recipient_emails||[]).join('\n'))}</textarea></div>
+          <div class="pst-field"><label>PR Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-pr-recipients" placeholder="procurement1@company.com&#10;procurement2@company.com" style="min-height:80px;">${esc((notifSettings.pr_recipient_emails||[]).join('\n'))}</textarea></div>
+          <div class="pst-field"><label>PR Recipient WhatsApp Numbers (E.164 format, one per line)</label><textarea id="notif-pr-recipients-wa" placeholder="+971501234567" style="min-height:80px;">${esc((notifSettings.pr_recipient_whatsapp||[]).join('\n'))}</textarea></div>
         </div>
 
         <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:20px 0 10px; border-top:1px solid var(--line); padding-top:16px;">3. Spare Parts Requests - Pending Delivery</p>
-        <p class="pst-panel-desc" style="margin-top:0;">Requests that have a Purchase Request No. but haven't been delivered yet. Items sharing the same PR No. are grouped together in the email. Uses the same cutoff date set above.</p>
+        <p class="pst-panel-desc" style="margin-top:0;">Requests that have a Purchase Request No. but haven't been delivered yet. Items sharing the same PR No. are grouped together. Uses the same cutoff date set above.</p>
         <div class="pst-grid">
-          <div class="pst-field full"><label>Delivery Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-delivery-recipients" placeholder="store1@company.com&#10;store2@company.com" style="min-height:80px;">${esc((notifSettings.delivery_recipient_emails||[]).join('\n'))}</textarea></div>
+          <div class="pst-field"><label>Delivery Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-delivery-recipients" placeholder="store1@company.com&#10;store2@company.com" style="min-height:80px;">${esc((notifSettings.delivery_recipient_emails||[]).join('\n'))}</textarea></div>
+          <div class="pst-field"><label>Delivery Recipient WhatsApp Numbers (E.164 format, one per line)</label><textarea id="notif-delivery-recipients-wa" placeholder="+971501234567" style="min-height:80px;">${esc((notifSettings.delivery_recipient_whatsapp||[]).join('\n'))}</textarea></div>
         </div>
 
         <div class="pst-btn-row">
           <button class="pst-btn pst-btn-primary" id="notif-save">Save Settings</button>
-          <button class="pst-btn pst-btn-ghost" id="notif-test">Send Test Emails Now</button>
+          <button class="pst-btn pst-btn-ghost" id="notif-test">Send Test Now (Email + WhatsApp)</button>
         </div>
         <div id="notif-msg"></div>
       </div>
@@ -1076,14 +1084,19 @@
     document.getElementById('notif-save').addEventListener('click', async ()=>{
       const msg = document.getElementById('notif-msg');
       const cutoff = document.getElementById('notif-cutoff').value || null;
-      const recipients = document.getElementById('notif-recipients').value
-        .split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
-      const prRecipients = document.getElementById('notif-pr-recipients').value
-        .split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
-      const deliveryRecipients = document.getElementById('notif-delivery-recipients').value
-        .split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
+      const parseList = id => document.getElementById(id).value.split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
+      const recipients = parseList('notif-recipients');
+      const prRecipients = parseList('notif-pr-recipients');
+      const deliveryRecipients = parseList('notif-delivery-recipients');
+      const recipientsWa = parseList('notif-recipients-wa');
+      const prRecipientsWa = parseList('notif-pr-recipients-wa');
+      const deliveryRecipientsWa = parseList('notif-delivery-recipients-wa');
       try{
-        await sb('notification_settings?id=eq.1', {method:'PATCH', body:{cutoff_date: cutoff, recipient_emails: recipients, pr_recipient_emails: prRecipients, delivery_recipient_emails: deliveryRecipients}});
+        await sb('notification_settings?id=eq.1', {method:'PATCH', body:{
+          cutoff_date: cutoff,
+          recipient_emails: recipients, pr_recipient_emails: prRecipients, delivery_recipient_emails: deliveryRecipients,
+          recipient_whatsapp: recipientsWa, pr_recipient_whatsapp: prRecipientsWa, delivery_recipient_whatsapp: deliveryRecipientsWa
+        }});
         msg.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
       }catch(e){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
@@ -1099,9 +1112,14 @@
         const labels = {approval_pending: 'Approval Pending', pr_pending: 'PR No. Pending', delivery_pending: 'Pending Delivery'};
         const lines = (result.results||[]).map(r=>{
           const label = labels[r.type] || r.type;
-          if(r.sent) return `${label}: sent — ${r.count} request(s) included.`;
-          if(r.error) return `${label}: error — ${r.error}`;
-          return `${label}: no email sent (${r.reason||'nothing matched'}).`;
+          if(!r.sent) return `${label}: nothing sent (${r.error || r.reason || 'nothing matched'}).`;
+          let line = `${label}: ${r.count} request(s) included.`;
+          if(r.email_recipients && r.email_recipients.length) line += ` Email sent to ${r.email_recipients.length} recipient(s).`;
+          if(r.whatsapp){
+            if(r.whatsapp.sent && r.whatsapp.sent.length) line += ` WhatsApp sent to ${r.whatsapp.sent.length} number(s).`;
+            if(r.whatsapp.failed && r.whatsapp.failed.length) line += ` WhatsApp FAILED for: ${r.whatsapp.failed.map(f=>f.to).join(', ')}.`;
+          }
+          return line;
         });
         msg.innerHTML = `<div class="pst-msg pst-msg-ok">${lines.map(esc).join('<br>')}</div>`;
       }catch(e){
