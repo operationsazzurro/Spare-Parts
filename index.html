@@ -500,19 +500,62 @@
     const href = PROCUREMENT_URL + encodeURIComponent(prNo.trim());
     return `<a href="${esc(href)}" target="_blank" rel="noopener" class="pst-pr-link" title="Open in Procurement software">${esc(prNo)}</a>`;
   }
+  function optimizePhotoForUpload(file, maxDimension=1600, quality=0.82){
+    if(!file) return Promise.resolve(null);
+    const type = (file.type || '').toLowerCase();
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    // Browser canvas support for HEIC/HEIF is inconsistent. Preserve those originals;
+    // the Overview now avoids downloading them until clicked.
+    if(type.includes('heic') || type.includes('heif') || ext==='heic' || ext==='heif'){
+      return Promise.resolve({blob:file, ext:ext || 'heic', type:file.type || 'application/octet-stream'});
+    }
+    if(!type.startsWith('image/')){
+      return Promise.resolve({blob:file, ext:ext || 'bin', type:file.type || 'application/octet-stream'});
+    }
+    return new Promise(resolve=>{
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = ()=>{
+        try{
+          const scale = Math.min(1, maxDimension / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+          const width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+          const height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(blob=>{
+            URL.revokeObjectURL(objectUrl);
+            if(!blob){ resolve({blob:file, ext:ext || 'jpg', type:file.type || 'image/jpeg'}); return; }
+            // JPEG gives predictable, compact files for nameplates/history-card photos.
+            resolve({blob, ext:'jpg', type:'image/jpeg'});
+          }, 'image/jpeg', quality);
+        }catch(e){
+          URL.revokeObjectURL(objectUrl);
+          resolve({blob:file, ext:ext || 'jpg', type:file.type || 'application/octet-stream'});
+        }
+      };
+      img.onerror = ()=>{
+        URL.revokeObjectURL(objectUrl);
+        resolve({blob:file, ext:ext || 'jpg', type:file.type || 'application/octet-stream'});
+      };
+      img.src = objectUrl;
+    });
+  }
+
   async function uploadPhoto(file, prefix){
     if(!file) return null;
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-    const path = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const optimized = await optimizePhotoForUpload(file);
+    const path = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${optimized.ext}`;
     const url = `${config.url}/storage/v1/object/${PHOTO_BUCKET}/${path}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'apikey': config.key,
         'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key),
-        'Content-Type': file.type || 'application/octet-stream'
+        'Content-Type': optimized.type
       },
-      body: file
+      body: optimized.blob
     });
     if(!res.ok){
       const txt = await res.text().catch(()=> '');
@@ -1393,6 +1436,7 @@
           <span class="pst-count" id="ov-page-label"></span>
           <button class="pst-btn pst-btn-ghost" id="ov-next">Next ›</button>
           <select id="ov-pagesize" style="margin-left:auto;">
+            <option value="25">25 per page</option>
             <option value="50">50 per page</option>
             <option value="100">100 per page</option>
             <option value="200">200 per page</option>
@@ -1436,11 +1480,13 @@
   function photoThumb(url){
     if(!url) return '<span style="color:var(--ink-soft);">—</span>';
     if(isHeicUrl(url)){
-      return `<span class="pst-photo-thumb pst-heic-thumb" data-full="${esc(url)}" data-heic="1" data-src="${esc(url)}" style="cursor:pointer; display:inline-block;">
+      // Do not fetch/convert HEIC files just to render a 36px table thumbnail.
+      // The original is downloaded only when the user clicks to open it.
+      return `<span class="pst-photo-thumb" data-full="${esc(url)}" data-heic="1" style="cursor:pointer; display:inline-block;" title="Click to load HEIC photo">
         <span class="pst-heic-placeholder" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:4px; border:1px solid var(--line); background:var(--gray-soft); font-size:8.5px; font-weight:700; color:var(--ink-soft);">HEIC</span>
       </span>`;
     }
-    return `<span class="pst-photo-thumb" data-full="${esc(url)}" style="cursor:pointer; display:inline-block;"><img src="${esc(url)}" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></span>`;
+    return `<span class="pst-photo-thumb" data-full="${esc(url)}" style="cursor:pointer; display:inline-block;"><img src="${esc(url)}" loading="lazy" decoding="async" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></span>`;
   }
   let heic2anyLoadPromise = null;
   function loadHeic2Any(){
@@ -1718,7 +1764,7 @@
   });
   let ovSort = {key:'date', dir:-1};
   let ovPage = 1;
-  let ovPageSize = 50;
+  let ovPageSize = 25;
   function priorityRank(p){
     const v = String(p||'').trim().toLowerCase();
     if(v==='high') return 0;
@@ -1787,7 +1833,7 @@
       const start = pageSize>0 ? (ovPage-1)*pageSize : 0;
       const pageList = ovPageSize==='all' ? list : list.slice(start, start+pageSize);
       tbody.innerHTML = ovRows(pageList);
-      renderHeicThumbs(tbody);
+      // HEIC previews are intentionally click-to-load to reduce Storage egress.
       wirePhotoThumbs(tbody);
       countEl.textContent = total + ' of ' + requests.length + ' requests';
       if(ovPageSize==='all' || total===0){
