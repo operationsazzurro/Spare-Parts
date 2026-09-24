@@ -482,12 +482,18 @@
     }
   }
   let notificationCutoffDate = null;
+  let notificationCutoffLoadError = null;
   async function loadNotificationCutoffDate(){
+    notificationCutoffLoadError = null;
     try{
+      // This setting is shared with the reminder system. Authenticated users who
+      // can open Procurement must have SELECT access to notification_settings.
       const rows = await sb('notification_settings?id=eq.1&select=cutoff_date') || [];
       notificationCutoffDate = rows[0] ? rows[0].cutoff_date : null;
     }catch(e){
       notificationCutoffDate = null;
+      notificationCutoffLoadError = e;
+      console.warn('Could not load shared procurement/reminder cutoff date:', e);
     }
   }
 
@@ -2375,8 +2381,10 @@
   async function procurementView(){
     await loadNotificationCutoffDate();
     const cutoffNote = notificationCutoffDate
-      ? ` Showing requests dated after <b>${esc(fmtDate(notificationCutoffDate))}</b> (same cutoff used for email reminders).`
-      : '';
+      ? ` Showing requests dated after <b>${esc(fmtDate(notificationCutoffDate))}</b> (same cutoff used for reminders).`
+      : (notificationCutoffLoadError
+          ? ` <span style="color:#b45309; font-weight:600;">Shared cutoff date could not be read. Ask the Supabase admin to allow authenticated users to read the cutoff setting.</span>`
+          : '');
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Procurement</p>
