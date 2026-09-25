@@ -1686,7 +1686,7 @@
         ['Request Date', fmtDate(r.request_date) || '—'],
         ['PR No.', r.pr_no || '—'],
         ['Site Name', r.site_project || '—'],
-        ['Machine Name', [r.machine, r.make].filter(v => String(v || '').trim()).join(' - ') || '—'],
+        ['Machine Name', [r.machine, r.make, r.model].map(v => String(v || '').trim()).filter(Boolean).join(' - ') || '—'],
         ['Parts Name', r.parts || '—'],
         ['Quantity Required', String(r.quantity ?? '—')],
         ['Requester Name', r.requested_by || '—'],
