@@ -1684,7 +1684,7 @@
       // ---- Field grid (word-wrapped, dynamic row heights so long values never overlap) ----
       const fields = [
         ['Request Date', fmtDate(r.request_date) || '—'],
-        ['Request Serial No.', reqSerial(r)],
+        ['PR No.', r.pr_no || '—'],
         ['Site Name', r.site_project || '—'],
         ['Machine Name', [r.machine, r.make].filter(v => String(v || '').trim()).join(' - ') || '—'],
         ['Parts Name', r.parts || '—'],
