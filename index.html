@@ -986,34 +986,45 @@
     const users = await sb('profiles?select=*&order=role.asc.nullsfirst,name.asc') || [];
     await loadSites();
     const notifSettingsRows = await sb('notification_settings?id=eq.1').catch(()=>[]) || [];
-    const notifSettings = notifSettingsRows[0] || {cutoff_date:'', recipient_emails:[], pr_recipient_emails:[], delivery_recipient_emails:[]};
+    const notifSettings = notifSettingsRows[0] || {cutoff_date:'', recipient_emails:[], pr_recipient_emails:[], delivery_recipient_emails:[], approval_enabled:true, pr_enabled:true, delivery_enabled:true};
     return `
       <div class="pst-panel">
         <p class="pst-panel-title">Notifications (Email)</p>
         <p class="pst-panel-desc">Three independent daily email checks. Leave a recipient field blank to skip that reminder. Nothing is sent if nothing matches. Requires the email notification function and daily schedule to be configured.</p>
 
-        <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:6px 0 10px;">1. Spare parts requests - Approval Pending</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:6px 0 10px;">
+          <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:0;">1. Spare parts requests - Approval Pending</p>
+          <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;"><input type="checkbox" id="notif-approval-enabled" ${notifSettings.approval_enabled !== false ? 'checked' : ''}> Active</label>
+        </div>
         <div class="pst-grid">
           <div class="pst-field"><label>Flag requests pending after this date</label><input type="date" id="notif-cutoff" value="${esc(notifSettings.cutoff_date||'')}"></div>
           <div class="pst-field"></div>
           <div class="pst-field"><label>Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-recipients" placeholder="approver1@company.com&#10;approver2@company.com" style="min-height:80px;">${esc((notifSettings.recipient_emails||[]).join('\n'))}</textarea></div>
         </div>
+        <div class="pst-btn-row" style="margin-top:8px;"><button class="pst-btn pst-btn-ghost notif-test-one" data-type="approval_pending">Send Approval Test Email</button></div>
 
-        <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:20px 0 10px; border-top:1px solid var(--line); padding-top:16px;">2. Pending Spare Parts request to raise</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:20px 0 10px;border-top:1px solid var(--line);padding-top:16px;">
+          <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:0;">2. Pending Spare Parts request to raise</p>
+          <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;"><input type="checkbox" id="notif-pr-enabled" ${notifSettings.pr_enabled !== false ? 'checked' : ''}> Active</label>
+        </div>
         <p class="pst-panel-desc" style="margin-top:0;">Requests that are Approved but still have no Purchase Request No. entered. Uses the same cutoff date set above.</p>
         <div class="pst-grid">
           <div class="pst-field"><label>PR Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-pr-recipients" placeholder="procurement1@company.com&#10;procurement2@company.com" style="min-height:80px;">${esc((notifSettings.pr_recipient_emails||[]).join('\n'))}</textarea></div>
         </div>
+        <div class="pst-btn-row" style="margin-top:8px;"><button class="pst-btn pst-btn-ghost notif-test-one" data-type="pr_pending">Send PR Pending Test Email</button></div>
 
-        <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:20px 0 10px; border-top:1px solid var(--line); padding-top:16px;">3. Spare Parts Requests - Pending Delivery</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:20px 0 10px;border-top:1px solid var(--line);padding-top:16px;">
+          <p style="font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); margin:0;">3. Spare Parts Requests - Pending Delivery</p>
+          <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;"><input type="checkbox" id="notif-delivery-enabled" ${notifSettings.delivery_enabled !== false ? 'checked' : ''}> Active</label>
+        </div>
         <p class="pst-panel-desc" style="margin-top:0;">Requests that have a Purchase Request No. but haven't been delivered yet. Items sharing the same PR No. are grouped together. Uses the same cutoff date set above.</p>
         <div class="pst-grid">
           <div class="pst-field"><label>Delivery Recipient Emails (one per line, or comma-separated)</label><textarea id="notif-delivery-recipients" placeholder="store1@company.com&#10;store2@company.com" style="min-height:80px;">${esc((notifSettings.delivery_recipient_emails||[]).join('\n'))}</textarea></div>
         </div>
+        <div class="pst-btn-row" style="margin-top:8px;"><button class="pst-btn pst-btn-ghost notif-test-one" data-type="delivery_pending">Send Delivery Test Email</button></div>
 
         <div class="pst-btn-row">
           <button class="pst-btn pst-btn-primary" id="notif-save">Save Settings</button>
-          <button class="pst-btn pst-btn-ghost" id="notif-test">Send Test Email Now</button>
         </div>
         <div id="notif-msg"></div>
       </div>
@@ -1110,7 +1121,7 @@
         <div id="adm-list-msg"></div>
       </div>`;
   }
-  async function callNotificationFunction(){
+  async function callNotificationFunction(testType=null){
     const res = await fetch(config.url + '/functions/v1/send-pending-notifications', {
       method: 'POST',
       headers: {
@@ -1118,7 +1129,7 @@
         'apikey': config.key,
         'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key)
       },
-      body: JSON.stringify({})
+      body: JSON.stringify(testType ? {test_type:testType} : {})
     });
     const data = await res.json().catch(()=> ({}));
     if(!res.ok){
@@ -1134,37 +1145,41 @@
       const recipients = parseList('notif-recipients');
       const prRecipients = parseList('notif-pr-recipients');
       const deliveryRecipients = parseList('notif-delivery-recipients');
+      const approvalEnabled = document.getElementById('notif-approval-enabled').checked;
+      const prEnabled = document.getElementById('notif-pr-enabled').checked;
+      const deliveryEnabled = document.getElementById('notif-delivery-enabled').checked;
       try{
         await sb('notification_settings?id=eq.1', {method:'PATCH', body:{
           cutoff_date: cutoff,
-          recipient_emails: recipients, pr_recipient_emails: prRecipients, delivery_recipient_emails: deliveryRecipients
+          recipient_emails: recipients, pr_recipient_emails: prRecipients, delivery_recipient_emails: deliveryRecipients,
+          approval_enabled: approvalEnabled, pr_enabled: prEnabled, delivery_enabled: deliveryEnabled
         }});
         msg.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
       }catch(e){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
       }
     });
-    document.getElementById('notif-test').addEventListener('click', async ()=>{
-      const msg = document.getElementById('notif-msg');
-      const btn = document.getElementById('notif-test');
-      btn.disabled = true;
-      msg.innerHTML = '<div class="pst-msg pst-msg-ok">Checking and sending, if applicable…</div>';
-      try{
-        const result = await callNotificationFunction();
-        const labels = {approval_pending: 'Approval Pending', pr_pending: 'PR No. Pending', delivery_pending: 'Pending Delivery'};
-        const lines = (result.results||[]).map(r=>{
-          const label = labels[r.type] || r.type;
-          if(!r.sent) return `${label}: nothing sent (${r.error || r.reason || 'nothing matched'}).`;
-          let line = `${label}: ${r.count} request(s) included.`;
-          if(r.email_recipients && r.email_recipients.length) line += ` Email sent to ${r.email_recipients.length} recipient(s).`;
-          return line;
-        });
-        msg.innerHTML = `<div class="pst-msg pst-msg-ok">${lines.map(esc).join('<br>')}</div>`;
-      }catch(e){
-        msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
-      }finally{
-        btn.disabled = false;
-      }
+    document.querySelectorAll('.notif-test-one').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const msg = document.getElementById('notif-msg');
+        const type = btn.dataset.type;
+        const labels = {approval_pending:'Approval Pending', pr_pending:'PR No. Pending', delivery_pending:'Pending Delivery'};
+        btn.disabled = true;
+        msg.innerHTML = `<div class="pst-msg pst-msg-ok">Testing ${esc(labels[type]||type)} reminder…</div>`;
+        try{
+          const result = await callNotificationFunction(type);
+          const r = (result.results||[])[0] || {};
+          if(!r.sent){
+            msg.innerHTML = `<div class="pst-msg pst-msg-ok">${esc(labels[type]||type)}: nothing sent (${esc(r.error || r.reason || 'nothing matched')}).</div>`;
+          }else{
+            msg.innerHTML = `<div class="pst-msg pst-msg-ok">${esc(labels[type]||type)} test sent successfully. ${esc(r.count||0)} request(s) included.</div>`;
+          }
+        }catch(e){
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+        }finally{
+          btn.disabled = false;
+        }
+      });
     });
     document.getElementById('imp-template').addEventListener('click', downloadImportTemplate);
     document.getElementById('imp-go').addEventListener('click', async ()=>{
