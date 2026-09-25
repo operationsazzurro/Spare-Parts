@@ -384,6 +384,33 @@
     return txt ? JSON.parse(txt) : null;
   }
 
+  // Egress-optimized REST helpers: exact counts and ranged server-side queries.
+  async function sbPaged(path, from, to){
+    if(!config) throw new Error('not_configured');
+    const url = config.url + '/rest/v1/' + path;
+    const headers = {
+      'apikey': config.key,
+      'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key),
+      'Content-Type': 'application/json',
+      'Prefer': 'count=exact',
+      'Range': `${from}-${to}`
+    };
+    const res = await fetch(url, {headers});
+    if(!res.ok){
+      const txt = await res.text().catch(()=> '');
+      throw new Error('Supabase error ('+res.status+'): '+txt);
+    }
+    const rows = await res.json().catch(()=> []);
+    const cr = res.headers.get('Content-Range') || '';
+    const m = cr.match(/\/(\d+|\*)$/);
+    return {rows: rows || [], count: m && m[1] !== '*' ? Number(m[1]) : (rows||[]).length};
+  }
+  async function sbCount(filter=''){
+    const path = PARTS_TABLE + '?select=id' + (filter ? '&' + filter : '');
+    const result = await sbPaged(path, 0, 0);
+    return result.count;
+  }
+
   // ---------- supabase auth REST helpers ----------
   async function authRequest(path, body){
     const res = await fetch(config.url + '/auth/v1/' + path, {
@@ -430,7 +457,7 @@
     if(!saved) return null;
     authTokens = saved;
     try{
-      const rows = await sb('profiles?select=*&id=eq.'+parseJwtSub(saved.access_token));
+      const rows = await sb('profiles?select=id,email,name,role,is_admin,allowed_tabs&id=eq.'+parseJwtSub(saved.access_token));
       if(rows && rows[0]) return rows[0];
       return null;
     }catch(e){
@@ -439,7 +466,7 @@
         const data = await authRequest('token?grant_type=refresh_token', {refresh_token: saved.refresh_token});
         authTokens = {access_token: data.access_token, refresh_token: data.refresh_token};
         await saveAuthSession(authTokens);
-        const rows = await sb('profiles?select=*&id=eq.'+parseJwtSub(authTokens.access_token));
+        const rows = await sb('profiles?select=id,email,name,role,is_admin,allowed_tabs&id=eq.'+parseJwtSub(authTokens.access_token));
         return rows && rows[0] ? rows[0] : null;
       }catch(e2){
         authTokens = null;
@@ -455,30 +482,59 @@
     }catch(e){ return ''; }
   }
 
-  async function loadRequests(){
+  // Egress optimization: requests are loaded per feature instead of downloading
+  // the complete table on every screen. Overview uses true server-side pagination.
+  const DATA_CACHE_TTL_MS = 60000;
+  let requestsLoadedAt = 0, assetsLoadedAt = 0, sitesLoadedAt = 0;
+  const REQUEST_SELECT = [
+    'id','created_at','request_date','site_project','machine','make','model','machine_serial',
+    'parts','quantity','priority','reason','requested_by','approval_status','approved_by',
+    'approval_date','pr_no','lpo_no','delivery_status','do_no','delivery_date','received_person',
+    'installation_status','remarks','nameplate_photo_url','history_card_photo_url'
+  ].join(',');
+  const ASSET_SELECT = 'id,created_at,site_name,location,barcode,machine_name,model_no,serial_no,year_of_installation,date_of_last_service,technician_name,machine_photo_url,nameplate_photo_url';
+  const SITE_SELECT = 'id,site_name';
+
+  async function loadRequests(force=false){
+    // Full-table loading is retained only for explicit workflows that genuinely
+    // require the complete dataset (currently admin import/dedup). Normal screens
+    // use loadRequestsForTab() or Overview server pagination instead.
+    if(!force && requestsLoadedAt && (Date.now()-requestsLoadedAt)<DATA_CACHE_TTL_MS) return requests;
     loading = true;
     try{
-      requests = await sb(PARTS_TABLE+'?select=*&order=created_at.desc.nullslast') || [];
+      requests = await sb(PARTS_TABLE+'?select='+encodeURIComponent(REQUEST_SELECT)+'&order=created_at.desc.nullslast') || [];
+      requestsLoadedAt = Date.now();
+      return requests;
+    }finally{ loading = false; }
+  }
+  async function loadRequestsForTab(tab){
+    let filter = '';
+    if(tab==='approve') filter = '&approval_status=ilike.Pending';
+    else if(tab==='store' || tab==='procurement') filter = '&approval_status=ilike.Approved';
+    else { requests = []; return requests; }
+    requests = await sb(PARTS_TABLE+'?select='+encodeURIComponent(REQUEST_SELECT)+filter+'&order=created_at.desc.nullslast') || [];
+    return requests;
+  }
+  async function loadAssets(force=false){
+    if(!force && assetsLoadedAt && (Date.now()-assetsLoadedAt)<DATA_CACHE_TTL_MS) return assets;
+    try{
+      assets = await sb(ASSETS_TABLE+'?select='+encodeURIComponent(ASSET_SELECT)+'&order=created_at.desc.nullslast') || [];
+      assetsLoadedAt = Date.now();
+      return assets;
     }catch(e){
-      requests = [];
+      if(!assets.length) assets = [];
       throw e;
-    }finally{
-      loading = false;
     }
   }
-  async function loadAssets(){
+  async function loadSites(force=false){
+    if(!force && sitesLoadedAt && (Date.now()-sitesLoadedAt)<DATA_CACHE_TTL_MS) return sites;
     try{
-      assets = await sb(ASSETS_TABLE+'?select=*&order=created_at.desc.nullslast') || [];
+      sites = await sb(SITES_TABLE+'?select='+encodeURIComponent(SITE_SELECT)+'&order=site_name.asc') || [];
+      sitesLoadedAt = Date.now();
+      return sites;
     }catch(e){
-      assets = [];
-      throw e;
-    }
-  }
-  async function loadSites(){
-    try{
-      sites = await sb(SITES_TABLE+'?select=*&order=site_name.asc') || [];
-    }catch(e){
-      sites = [];
+      if(!sites.length) sites = [];
+      return sites;
     }
   }
   let notificationCutoffDate = null;
@@ -679,24 +735,26 @@
     document.body.removeChild(ta);
   }
 
+  let ladderCounts = {total:0, approved:0, delivered:0, installed:0};
+  let ladderLoadedAt = 0;
+  async function refreshLadderCounts(force=false){
+    if(!force && ladderLoadedAt && Date.now()-ladderLoadedAt < DATA_CACHE_TTL_MS) return;
+    try{
+      const [total,approved,delivered,installed] = await Promise.all([
+        sbCount(), sbCount('approval_status=ilike.Approved'),
+        sbCount('delivery_status=ilike.Delivered'), sbCount('installation_status=ilike.Installed')
+      ]);
+      ladderCounts={total,approved,delivered,installed}; ladderLoadedAt=Date.now();
+    }catch(e){ console.warn('Could not refresh ladder counts:', e); }
+  }
   function renderLadder(){
-    const total = requests.length;
-    const approved = requests.filter(r=>statusEq(r.approval_status,'Approved')).length;
-    const delivered = requests.filter(r=>statusEq(r.delivery_status,'Delivered')).length;
-    const installed = requests.filter(r=>statusEq(r.installation_status,'Installed')).length;
     const stages = [
-      {label:'Requested', count: total},
-      {label:'Approved', count: approved},
-      {label:'Delivered', count: delivered},
-      {label:'Installed', count: installed}
+      {label:'Requested', count:ladderCounts.total}, {label:'Approved', count:ladderCounts.approved},
+      {label:'Delivered', count:ladderCounts.delivered}, {label:'Installed', count:ladderCounts.installed}
     ];
     ladderEl.innerHTML = stages.map((s,i)=>`
-      <div class="pst-node ${s.count>0?'active':''}">
-        <div class="pst-line"></div>
-        <div class="pst-dot"></div>
-        <div class="pst-node-count">${s.count}</div>
-        <div class="pst-node-label">${s.label}</div>
-      </div>`).join('');
+      <div class="pst-node ${s.count>0?'active':''}"><div class="pst-line"></div><div class="pst-dot"></div>
+      <div class="pst-node-count">${s.count}</div><div class="pst-node-label">${s.label}</div></div>`).join('');
   }
 
   // ---------- render dispatcher ----------
@@ -716,20 +774,18 @@
       return;
     }
 
-    body.innerHTML = '<div class="pst-panel"><p class="pst-panel-desc">Loading requests…</p></div>';
+    body.innerHTML = '<div class="pst-panel"><p class="pst-panel-desc">Loading…</p></div>';
     try{
-      await loadRequests();
-      if(currentTab==='asset_view' || currentTab==='asset_add'){
-        await loadAssets();
-      }
-      if(currentTab==='asset_add' || currentTab==='request'){
-        await loadSites();
-      }
+      await refreshLadderCounts();
+      renderLadder();
+      if(currentTab==='approve' || currentTab==='store' || currentTab==='procurement') await loadRequestsForTab(currentTab);
+      else if(currentTab!=='overview') requests = [];
+      if(currentTab==='asset_view' || currentTab==='asset_add') await loadAssets();
+      if(currentTab==='asset_add' || currentTab==='request') await loadSites();
     }catch(e){
       body.innerHTML = `<div class="pst-msg pst-msg-err">Could not load data: ${esc(e.message)}</div>`;
       return;
     }
-    renderLadder();
 
     const pendingBanner = session.role==='unassigned'
       ? `<div class="pst-banner"><span>⏳ Your account is signed in but hasn't been assigned a role yet. You have read-only access until an admin assigns you as Technician, Approver, or Admin.</span></div>`
@@ -801,7 +857,7 @@
     return 'unassigned';
   }
   async function loadSessionFromTokens(){
-    const rows = await sb('profiles?select=*&id=eq.'+parseJwtSub(authTokens.access_token));
+    const rows = await sb('profiles?select=id,email,name,role,is_admin,allowed_tabs&id=eq.'+parseJwtSub(authTokens.access_token));
     const p = rows && rows[0];
     session = {
       role: resolveRole(p),
@@ -1198,7 +1254,7 @@
           return;
         }
         msg.innerHTML = '<div class="pst-msg pst-msg-ok">Checking for duplicates…</div>';
-        await loadRequests(); // refresh so dedup checks against the latest data
+        await loadRequests(true); // force refresh so dedup checks against the latest data
         const existingKeys = new Set(requests.map(dupKey));
         const seenInFile = new Set();
         const toImport = [];
@@ -1251,7 +1307,7 @@
           btn.disabled = false;
           return;
         }
-        await loadSites();
+        await loadSites(true);
         const existing = new Set(sites.map(s=>s.site_name.trim().toLowerCase()));
         const seen = new Set();
         const toImport = [];
@@ -1821,154 +1877,91 @@
     const nextBtn = document.getElementById('ov-next');
     const pageSizeEl = document.getElementById('ov-pagesize');
     pageSizeEl.value = String(ovPageSize);
-    function apply(){
-      const q = document.getElementById('ov-search').value.toLowerCase();
+    let requestSeq = 0;
+
+    const serverSortColumn = {serial:'id',date:'request_date',site:'site_project',machine:'machine',parts:'parts',qty:'quantity',priority:'priority',requested_by:'requested_by',approval:'approval_status',pr_no:'pr_no',lpo_no:'lpo_no',delivery:'delivery_status',do_no:'do_no',delivery_date:'delivery_date',received_by:'received_person',installation:'installation_status',remarks:'remarks'};
+    function encLike(v){ return encodeURIComponent('*'+String(v||'').replace(/[*,()]/g,' ')+'*'); }
+    async function apply(){
+      const seq=++requestSeq;
+      const q = document.getElementById('ov-search').value.trim();
       const ap = document.getElementById('ov-approval').value;
       const de = document.getElementById('ov-delivery').value;
-      let list = requests.filter(r=>{
-        if(ap && !statusEq(r.approval_status,ap)) return false;
-        if(de && !statusEq(r.delivery_status,de)) return false;
-        if(q){
-          const hay = [r.site_project,r.parts,r.machine,r.requested_by,r.make,r.model].join(' ').toLowerCase();
-          if(!hay.includes(q)) return false;
-        }
-        return true;
-      });
-      list = sortRequests(list);
-      const total = list.length;
-      const pageSize = ovPageSize==='all' ? total : ovPageSize;
-      const totalPages = pageSize>0 ? Math.max(1, Math.ceil(total/pageSize)) : 1;
-      if(ovPage > totalPages) ovPage = totalPages;
-      if(ovPage < 1) ovPage = 1;
-      const start = pageSize>0 ? (ovPage-1)*pageSize : 0;
-      const pageList = ovPageSize==='all' ? list : list.slice(start, start+pageSize);
-      tbody.innerHTML = ovRows(pageList);
-      // HEIC previews are intentionally click-to-load to reduce Storage egress.
-      wirePhotoThumbs(tbody);
-      countEl.textContent = total + ' of ' + requests.length + ' requests';
-      if(ovPageSize==='all' || total===0){
-        pageLabelEl.textContent = total===0 ? 'No results' : `Showing all ${total}`;
-      }else{
-        pageLabelEl.textContent = `Page ${ovPage} of ${totalPages} (${start+1}–${Math.min(start+pageSize,total)} of ${total})`;
+      const params = ['select='+encodeURIComponent(REQUEST_SELECT)];
+      if(ap) params.push('approval_status=ilike.'+encodeURIComponent(ap));
+      if(de) params.push('delivery_status=ilike.'+encodeURIComponent(de));
+      if(q){
+        const v=encLike(q);
+        params.push('or='+encodeURIComponent(`site_project.ilike.*${q.replace(/[*,()]/g,' ')}*,parts.ilike.*${q.replace(/[*,()]/g,' ')}*,machine.ilike.*${q.replace(/[*,()]/g,' ')}*,requested_by.ilike.*${q.replace(/[*,()]/g,' ')}*,make.ilike.*${q.replace(/[*,()]/g,' ')}*,model.ilike.*${q.replace(/[*,()]/g,' ')}*`));
       }
-      prevBtn.disabled = ovPage<=1 || ovPageSize==='all';
-      nextBtn.disabled = ovPage>=totalPages || ovPageSize==='all';
-      tbody.querySelectorAll('.ov-store-jump').forEach(btn=>{
-        btn.addEventListener('click', (e)=>{
-          e.stopPropagation();
-          const id = btn.dataset.id;
-          const r = requests.find(x=>x.id===id);
-          if(r) openInStoreUpdate(r);
-        });
-      });
-      tbody.querySelectorAll('.ov-pdf').forEach(btn=>{
-        btn.addEventListener('click', (e)=>{
-          e.stopPropagation();
-          const id = btn.dataset.id;
-          const r = requests.find(x=>x.id===id);
-          if(r) generateRequestPdf(r, btn);
-        });
-      });
-      tbody.querySelectorAll('.ov-copy-serial').forEach(el=>{
-        el.addEventListener('click', ()=>{
-          copyToClipboard(el.dataset.copy, el);
-        });
-      });
-      if(session.role==='admin'){
-        tbody.querySelectorAll('.ov-delete').forEach(btn=>{
-          btn.addEventListener('click', async (e)=>{
-            e.stopPropagation();
-            const id = btn.dataset.id;
-            const r = requests.find(x=>x.id===id);
-            const label = r ? `${r.parts} (${reqSerial(r)})` : 'this record';
-            if(!confirm(`Delete request for "${label}"? This cannot be undone.`)) return;
-            btn.disabled = true;
-            try{
-              const result = await sb(PARTS_TABLE+'?id=eq.'+id, {method:'DELETE'});
-              if(!result || result.length===0){
-                throw new Error('Nothing was deleted. Your database permissions (Row Level Security) likely don\'t allow admins to delete records yet — see the delete policy note in Manage Users / ask whoever set up Supabase to run the DELETE policy SQL.');
-              }
-              if(r) deletePhotos([r.nameplate_photo_url, r.history_card_photo_url]); // best-effort, don't block on this
-              requests = requests.filter(x=>x.id!==id);
-              renderLadder();
-              apply();
-            }catch(err){
-              alert('Could not delete: '+err.message);
-              btn.disabled = false;
-            }
-          });
-        });
-      }
+      const col=serverSortColumn[ovSort.key] || 'request_date';
+      params.push('order='+encodeURIComponent(col+'.'+(ovSort.dir===1?'asc':'desc')+'.nullslast'));
+      const size = ovPageSize==='all' ? 100000 : Number(ovPageSize)||25;
+      const from = ovPageSize==='all' ? 0 : (ovPage-1)*size;
+      const to = from + size - 1;
+      tbody.innerHTML='<tr><td colspan="24" class="pst-empty">Loading…</td></tr>';
+      try{
+        const result=await sbPaged(PARTS_TABLE+'?'+params.join('&'),from,to);
+        if(seq!==requestSeq) return;
+        const total=result.count;
+        const totalPages=Math.max(1,Math.ceil(total/size));
+        if(ovPage!=='all' && ovPage>totalPages){ ovPage=totalPages; return apply(); }
+        requests=result.rows; // only the visible page is held in memory
+        tbody.innerHTML=ovRows(requests);
+        wirePhotoThumbs(tbody);
+        countEl.textContent=total+' requests';
+        if(ovPageSize==='all' || total===0) pageLabelEl.textContent=total===0?'No results':`Showing all ${total}`;
+        else pageLabelEl.textContent=`Page ${ovPage} of ${totalPages} (${from+1}–${Math.min(to+1,total)} of ${total})`;
+        prevBtn.disabled=ovPage<=1 || ovPageSize==='all';
+        nextBtn.disabled=ovPage>=totalPages || ovPageSize==='all';
+        tbody.querySelectorAll('.ov-store-jump').forEach(btn=>btn.addEventListener('click',(e)=>{e.stopPropagation(); const r=requests.find(x=>x.id===btn.dataset.id); if(r) openInStoreUpdate(r);}));
+        tbody.querySelectorAll('.ov-pdf').forEach(btn=>btn.addEventListener('click',(e)=>{e.stopPropagation(); const r=requests.find(x=>x.id===btn.dataset.id); if(r) generateRequestPdf(r,btn);}));
+        tbody.querySelectorAll('.ov-copy-serial').forEach(el=>el.addEventListener('click',()=>copyToClipboard(el.dataset.copy,el)));
+        if(session.role==='admin') tbody.querySelectorAll('.ov-delete').forEach(btn=>btn.addEventListener('click',async(e)=>{
+          e.stopPropagation(); const id=btn.dataset.id; const r=requests.find(x=>x.id===id); const label=r?`${r.parts} (${reqSerial(r)})`:'this record';
+          if(!confirm(`Delete request for "${label}"? This cannot be undone.`)) return;
+          btn.disabled=true;
+          try{ const result=await sb(PARTS_TABLE+'?id=eq.'+id,{method:'DELETE'}); if(!result||result.length===0) throw new Error('Nothing was deleted. Check the Supabase DELETE RLS policy.'); if(r) deletePhotos([r.nameplate_photo_url,r.history_card_photo_url]); ladderLoadedAt=0; await refreshLadderCounts(true); renderLadder(); await apply(); }
+          catch(err){ alert('Could not delete: '+err.message); btn.disabled=false; }
+        }));
+      }catch(e){ if(seq===requestSeq) tbody.innerHTML=`<tr><td colspan="24" class="pst-empty">Could not load requests: ${esc(e.message)}</td></tr>`; }
+      updateSortArrows();
     }
+    let searchTimer=null;
     ['ov-search','ov-approval','ov-delivery'].forEach(id=>{
-      document.getElementById(id).addEventListener('input', ()=>{ ovPage=1; apply(); });
-      document.getElementById(id).addEventListener('change', ()=>{ ovPage=1; apply(); });
+      const el=document.getElementById(id);
+      const fn=()=>{ovPage=1; clearTimeout(searchTimer); searchTimer=setTimeout(apply,id==='ov-search'?300:0);};
+      el.addEventListener(id==='ov-search'?'input':'change',fn);
     });
     document.getElementById('ov-export').addEventListener('click', exportCSV);
-    prevBtn.addEventListener('click', ()=>{ if(ovPage>1){ ovPage--; apply(); } });
-    nextBtn.addEventListener('click', ()=>{ ovPage++; apply(); });
-    pageSizeEl.addEventListener('change', ()=>{
-      ovPageSize = pageSizeEl.value==='all' ? 'all' : parseInt(pageSizeEl.value);
-      ovPage = 1;
-      apply();
-    });
+    prevBtn.addEventListener('click',()=>{if(ovPage>1){ovPage--;apply();}});
+    nextBtn.addEventListener('click',()=>{ovPage++;apply();});
+    pageSizeEl.addEventListener('change',()=>{ovPageSize=pageSizeEl.value==='all'?'all':parseInt(pageSizeEl.value);ovPage=1;apply();});
     function updateSortArrows(){
-      document.querySelectorAll('#ov-thead th.ov-sortable').forEach(th=>{
-        const arrow = th.querySelector('.ov-sort-arrow');
-        if(th.dataset.sort === ovSort.key){
-          arrow.textContent = ovSort.dir===1 ? ' ▲' : ' ▼';
-          th.classList.add('ov-sorted');
-        }else{
-          arrow.textContent = '';
-          th.classList.remove('ov-sorted');
-        }
+      document.querySelectorAll('#ov-thead .ov-sortable').forEach(th=>{
+        const arrow=th.querySelector('.ov-sort-arrow'); const active=th.dataset.sort===ovSort.key;
+        th.classList.toggle('ov-sorted',active); arrow.textContent=active?(ovSort.dir===1?' ▲':' ▼'):'';
       });
     }
-    document.querySelectorAll('#ov-thead th.ov-sortable').forEach(th=>{
-      th.addEventListener('click', ()=>{
-        const key = th.dataset.sort;
-        if(ovSort.key===key){
-          ovSort.dir = -ovSort.dir;
-        }else{
-          ovSort = {key, dir:1};
-        }
-        ovPage = 1;
-        updateSortArrows();
-        apply();
-      });
-    });
-    updateSortArrows();
+    document.querySelectorAll('#ov-thead .ov-sortable').forEach(th=>th.addEventListener('click',()=>{
+      const key=th.dataset.sort; if(ovSort.key===key) ovSort.dir*=-1; else {ovSort.key=key;ovSort.dir=1;} ovPage=1; apply();
+    }));
     apply();
   }
-  function openInStoreUpdate(r){
-    const tabs = tabsForSession();
-    if(!tabs.find(t=>t[0]==='store')){
-      alert('Store Update isn\'t available for your account.');
-      return;
-    }
-    if(!statusEq(r.approval_status,'Approved')){
-      alert('This request hasn\'t been approved yet, so it doesn\'t appear in Store Update.');
-      return;
-    }
-    pendingOpenRecordId = r.id;
-    currentTab = 'store';
-    renderTabsBar();
-    render();
-  }
-  function exportCSV(){
-    const cols = ['id','request_date','site_project','machine','make','model','machine_serial','parts','quantity','priority','reason','requested_by','approval_status','approved_by','pr_no','lpo_no','delivery_status','do_no','delivery_date','received_person','installation_status','remarks','nameplate_photo_url','history_card_photo_url'];
-    const lines = [cols.join(',')];
-    requests.forEach(r=>{
-      lines.push(cols.map(c=>{
-        let v = r[c]==null? '' : String(r[c]).replace(/"/g,'""');
-        return /[,"\n]/.test(v) ? `"${v}"` : v;
-      }).join(','));
-    });
-    const blob = new Blob([lines.join('\n')], {type:'text/csv'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'spare_parts_requests.csv';
-    a.click();
+
+  async function exportCSV(){
+    const btn=document.getElementById('ov-export');
+    const old=btn?btn.textContent:'';
+    if(btn){btn.disabled=true;btn.textContent='Preparing CSV…';}
+    try{
+      // Full dataset is fetched only on explicit Export click; normal browsing never downloads it.
+      const all = await sb(PARTS_TABLE+'?select='+encodeURIComponent(REQUEST_SELECT)+'&order=created_at.desc.nullslast') || [];
+      const cols = ['id','request_date','site_project','machine','make','model','machine_serial','parts','quantity','priority','reason','requested_by','approval_status','approved_by','pr_no','lpo_no','delivery_status','do_no','delivery_date','received_person','installation_status','remarks','nameplate_photo_url','history_card_photo_url'];
+      const lines=[cols.join(',')];
+      all.forEach(r=>lines.push(cols.map(c=>{let v=r[c]==null?'':String(r[c]).replace(/"/g,'""');return /[,"\n]/.test(v)?`"${v}"`:v;}).join(',')));
+      const blob=new Blob([lines.join('\n')],{type:'text/csv'}); const a=document.createElement('a'); const url=URL.createObjectURL(blob);
+      a.href=url;a.download='spare_parts_requests.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+    }catch(e){ alert('Could not export CSV: '+e.message); }
+    finally{if(btn){btn.disabled=false;btn.textContent=old;}}
   }
 
   function photoFieldHTML(label, prefix){
@@ -2364,7 +2357,7 @@
           await sb(PARTS_TABLE+'?id=eq.'+id, {method:'PATCH', body:payload});
           msgEl.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
           Object.assign(requests.find(r=>r.id===id), payload);
-          renderLadder();
+          ladderLoadedAt=0; refreshLadderCounts(true).then(renderLadder);
         }catch(e){
           msgEl.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
         }
