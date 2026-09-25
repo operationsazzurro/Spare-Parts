@@ -1890,8 +1890,10 @@
       if(ap) params.push('approval_status=ilike.'+encodeURIComponent(ap));
       if(de) params.push('delivery_status=ilike.'+encodeURIComponent(de));
       if(q){
-        const v=encLike(q);
-        params.push('or='+encodeURIComponent(`site_project.ilike.*${q.replace(/[*,()]/g,' ')}*,parts.ilike.*${q.replace(/[*,()]/g,' ')}*,machine.ilike.*${q.replace(/[*,()]/g,' ')}*,requested_by.ilike.*${q.replace(/[*,()]/g,' ')}*,make.ilike.*${q.replace(/[*,()]/g,' ')}*,model.ilike.*${q.replace(/[*,()]/g,' ')}*`));
+        // PostgREST OR filters must be wrapped in parentheses: or=(a.ilike.*,b.ilike.*).
+        // Encode only the user's search text, not the OR grammar itself.
+        const v = encodeURIComponent(q.replace(/[*,()]/g,' ').trim());
+        params.push(`or=(site_project.ilike.*${v}*,parts.ilike.*${v}*,machine.ilike.*${v}*,requested_by.ilike.*${v}*,make.ilike.*${v}*,model.ilike.*${v}*)`);
       }
       const col=serverSortColumn[ovSort.key] || 'request_date';
       params.push('order='+encodeURIComponent(col+'.'+(ovSort.dir===1?'asc':'desc')+'.nullslast'));
