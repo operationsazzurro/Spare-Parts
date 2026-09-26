@@ -82,6 +82,12 @@
   .pst-lightbox-img{max-width:100%; max-height:68vh; border-radius:6px; object-fit:contain;}
   .pst-lightbox-loading{padding:60px 50px; color:var(--ink-soft); font-size:13px;}
   .pst-lightbox-actions{display:flex; gap:8px;}
+  .pst-photo-mini{width:54px;height:42px;padding:0;border:1px solid var(--line);border-radius:5px;background:#f5f7f8;overflow:hidden;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;}
+  .pst-photo-mini img{width:100%;height:100%;object-fit:cover;display:block;}
+  .pst-photo-mini:hover{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-soft);}
+  .pst-photo-heic span,.pst-photo-placeholder{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;color:var(--ink-soft);letter-spacing:.3px;}
+  .pst-photo-placeholder{display:none;}
+
   table.pst-table th{text-align:left; font-family:'Inter',sans-serif; font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); border-bottom:2px solid var(--line); padding:8px 8px; white-space:nowrap;}
   table.pst-table th.ov-sortable{cursor:pointer; user-select:none;}
   table.pst-table th.ov-sortable:hover{color:var(--ink);}
@@ -562,66 +568,127 @@
     const href = PROCUREMENT_URL + encodeURIComponent(prNo.trim());
     return `<a href="${esc(href)}" target="_blank" rel="noopener" class="pst-pr-link" title="Open in Procurement software">${esc(prNo)}</a>`;
   }
-  function optimizePhotoForUpload(file, maxDimension=1600, quality=0.82){
-    if(!file) return Promise.resolve(null);
+  async function optimizePhotoForUpload(file, maxDimension=1600, quality=0.78){
+    if(!file) return null;
     const type = (file.type || '').toLowerCase();
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    // Browser canvas support for HEIC/HEIF is inconsistent. Preserve those originals;
-    // the Overview now avoids downloading them until clicked.
-    if(type.includes('heic') || type.includes('heif') || ext==='heic' || ext==='heif'){
-      return Promise.resolve({blob:file, ext:ext || 'heic', type:file.type || 'application/octet-stream'});
+    const isHeic = type.includes('heic') || type.includes('heif') || ext==='heic' || ext==='heif';
+
+    // Convert HEIC/HEIF before upload so large iPhone originals are not stored/served repeatedly.
+    // If conversion is unavailable, fall back to the original rather than breaking uploads.
+    let sourceBlob = file;
+    if(isHeic){
+      try{
+        const heic2any = await loadHeic2Any();
+        const converted = await heic2any({blob:file, toType:'image/jpeg', quality:0.82});
+        sourceBlob = Array.isArray(converted) ? converted[0] : converted;
+      }catch(e){
+        console.warn('HEIC upload optimization unavailable; uploading original.', e);
+        return {blob:file, ext:ext || 'heic', type:file.type || 'application/octet-stream'};
+      }
+    }else if(!type.startsWith('image/')){
+      return {blob:file, ext:ext || 'bin', type:file.type || 'application/octet-stream'};
     }
-    if(!type.startsWith('image/')){
-      return Promise.resolve({blob:file, ext:ext || 'bin', type:file.type || 'application/octet-stream'});
-    }
+
     return new Promise(resolve=>{
-      const objectUrl = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(sourceBlob);
       const img = new Image();
       img.onload = ()=>{
         try{
-          const scale = Math.min(1, maxDimension / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
-          const width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
-          const height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+          const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+          const scale = Math.min(1, maxDimension / Math.max(iw, ih));
+          const width = Math.max(1, Math.round(iw * scale));
+          const height = Math.max(1, Math.round(ih * scale));
           const canvas = document.createElement('canvas');
           canvas.width = width; canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
           canvas.toBlob(blob=>{
             URL.revokeObjectURL(objectUrl);
-            if(!blob){ resolve({blob:file, ext:ext || 'jpg', type:file.type || 'image/jpeg'}); return; }
-            // JPEG gives predictable, compact files for nameplates/history-card photos.
+            if(!blob){
+              resolve(isHeic ? {blob:sourceBlob, ext:'jpg', type:'image/jpeg'} : {blob:file, ext:ext || 'jpg', type:file.type || 'image/jpeg'});
+              return;
+            }
             resolve({blob, ext:'jpg', type:'image/jpeg'});
           }, 'image/jpeg', quality);
         }catch(e){
           URL.revokeObjectURL(objectUrl);
-          resolve({blob:file, ext:ext || 'jpg', type:file.type || 'application/octet-stream'});
+          resolve(isHeic ? {blob:sourceBlob, ext:'jpg', type:'image/jpeg'} : {blob:file, ext:ext || 'jpg', type:file.type || 'application/octet-stream'});
         }
       };
       img.onerror = ()=>{
         URL.revokeObjectURL(objectUrl);
-        resolve({blob:file, ext:ext || 'jpg', type:file.type || 'application/octet-stream'});
+        resolve(isHeic ? {blob:sourceBlob, ext:'jpg', type:'image/jpeg'} : {blob:file, ext:ext || 'jpg', type:file.type || 'application/octet-stream'});
       };
       img.src = objectUrl;
     });
   }
 
+  async function makeThumbnailBlob(sourceBlob, maxDimension=240, quality=0.66){
+    return new Promise((resolve, reject)=>{
+      const objectUrl = URL.createObjectURL(sourceBlob);
+      const img = new Image();
+      img.onload = ()=>{
+        try{
+          const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+          const scale=Math.min(1, maxDimension/Math.max(iw,ih));
+          const canvas=document.createElement('canvas');
+          canvas.width=Math.max(1,Math.round(iw*scale));
+          canvas.height=Math.max(1,Math.round(ih*scale));
+          canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+          canvas.toBlob(blob=>{
+            URL.revokeObjectURL(objectUrl);
+            blob ? resolve(blob) : reject(new Error('Thumbnail conversion failed'));
+          },'image/jpeg',quality);
+        }catch(e){ URL.revokeObjectURL(objectUrl); reject(e); }
+      };
+      img.onerror=()=>{ URL.revokeObjectURL(objectUrl); reject(new Error('Thumbnail image could not be decoded')); };
+      img.src=objectUrl;
+    });
+  }
+  async function uploadStorageObject(path, blob, contentType){
+    const res = await fetch(`${config.url}/storage/v1/object/${PHOTO_BUCKET}/${path}`, {
+      method:'POST',
+      headers:{
+        'apikey':config.key,
+        'Authorization':'Bearer '+(authTokens ? authTokens.access_token : config.key),
+        'Content-Type':contentType
+      },
+      body:blob
+    });
+    if(!res.ok){
+      const txt=await res.text().catch(()=> '');
+      throw new Error('Photo upload failed: '+txt);
+    }
+  }
   async function uploadPhoto(file, prefix){
     if(!file) return null;
     const optimized = await optimizePhotoForUpload(file);
-    const path = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${optimized.ext}`;
-    const url = `${config.url}/storage/v1/object/${PHOTO_BUCKET}/${path}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'apikey': config.key,
-        'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key),
-        'Content-Type': optimized.type
-      },
-      body: optimized.blob
-    });
-    if(!res.ok){
-      const txt = await res.text().catch(()=> '');
-      throw new Error('Photo upload failed: '+txt);
+    const token = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const path = `${token}.${optimized.ext}`;
+
+    // Upload the optimized full/preview image first. New JPG/PNG/HEIC uploads are
+    // normally converted to a compact JPEG (max 1600 px) before reaching Storage.
+    await uploadStorageObject(path, optimized.blob, optimized.type);
+
+    // Store a physically separate tiny JPEG thumbnail. Overview uses this object,
+    // so rendering a 54x42 preview never downloads the full-resolution image.
+    // If a HEIC/HEIF could not be converted, keep it as HEIC and do not create a
+    // thumbnail; the UI intentionally keeps the HEIC placeholder until replaced.
+    if(optimized.ext === 'jpg' && optimized.type === 'image/jpeg'){
+      try{
+        // Tiny list thumbnail: lowest egress for Overview/table rendering.
+        const thumbBlob = await makeThumbnailBlob(optimized.blob, 240, 0.66);
+        await uploadStorageObject(`${token}-thumb.jpg`, thumbBlob, 'image/jpeg');
+
+        // Dedicated PDF image: large enough for a clear A4 request form, but much
+        // smaller than the 1600 px full/preview image. PDF generation requests this
+        // object first, so routine PDF creation does not fetch the full image.
+        const pdfBlob = await makeThumbnailBlob(optimized.blob, 720, 0.72);
+        await uploadStorageObject(`${token}-pdf.jpg`, pdfBlob, 'image/jpeg');
+      }catch(e){
+        console.warn('Thumbnail/PDF image upload skipped; full image remains available.', e);
+      }
     }
     return `${config.url}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
   }
@@ -636,13 +703,18 @@
     const path = storagePathFromUrl(url);
     if(!path) return;
     try{
-      await fetch(`${config.url}/storage/v1/object/${PHOTO_BUCKET}/${path}`, {
+      const paths=[path];
+      if(/\.(jpg|jpeg)$/i.test(path) && !/-(thumb|pdf)\.jpg$/i.test(path)){
+        paths.push(path.replace(/\.(jpg|jpeg)$/i,'-thumb.jpg'));
+        paths.push(path.replace(/\.(jpg|jpeg)$/i,'-pdf.jpg'));
+      }
+      await Promise.all(paths.map(p=>fetch(`${config.url}/storage/v1/object/${PHOTO_BUCKET}/${p}`, {
         method: 'DELETE',
         headers: {
           'apikey': config.key,
           'Authorization': 'Bearer ' + (authTokens ? authTokens.access_token : config.key)
         }
-      });
+      })));
     }catch(e){
       // Best-effort: if this fails (e.g. already gone, or storage delete not permitted),
       // we still want the record deletion itself to succeed.
@@ -1543,16 +1615,39 @@
   function isHeicUrl(url){
     return /\.(heic|heif)(\?|#|$)/i.test(url||'');
   }
+  function thumbnailUrlFor(url){
+    if(!url || isHeicUrl(url)) return null;
+    // New uploads use <original-name>-thumb.jpg. Existing pre-optimization images
+    // may not have this object; a tiny 404 then becomes an IMG placeholder without
+    // falling back to the large original (which would defeat the egress saving).
+    const clean=url.split('#')[0];
+    const hash=url.includes('#') ? '#'+url.split('#').slice(1).join('#') : '';
+    const qIndex=clean.indexOf('?');
+    const base=qIndex>=0 ? clean.slice(0,qIndex) : clean;
+    const query=qIndex>=0 ? clean.slice(qIndex) : '';
+    if(!/\.(jpg|jpeg|png|webp)$/i.test(base)) return null;
+    return base.replace(/\.(jpg|jpeg|png|webp)$/i,'-thumb.jpg') + query + hash;
+  }
+  function pdfImageUrlFor(url){
+    if(!url || isHeicUrl(url)) return null;
+    const clean=url.split('#')[0];
+    const hash=url.includes('#') ? '#'+url.split('#').slice(1).join('#') : '';
+    const qIndex=clean.indexOf('?');
+    const base=qIndex>=0 ? clean.slice(0,qIndex) : clean;
+    const query=qIndex>=0 ? clean.slice(qIndex) : '';
+    if(!/\.(jpg|jpeg|png|webp)$/i.test(base)) return null;
+    return base.replace(/\.(jpg|jpeg|png|webp)$/i,'-pdf.jpg') + query + hash;
+  }
   function photoThumb(url){
     if(!url) return '<span style="color:var(--ink-soft);">—</span>';
     if(isHeicUrl(url)){
-      // Do not fetch/convert HEIC files just to render a 36px table thumbnail.
-      // The original is downloaded only when the user clicks to open it.
-      return `<span class="pst-photo-thumb" data-full="${esc(url)}" data-heic="1" style="cursor:pointer; display:inline-block;" title="Click to load HEIC photo">
-        <span class="pst-heic-placeholder" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:4px; border:1px solid var(--line); background:var(--gray-soft); font-size:8.5px; font-weight:700; color:var(--ink-soft);">HEIC</span>
-      </span>`;
+      return `<button type="button" class="pst-photo-thumb pst-photo-mini pst-photo-heic" data-full="${esc(url)}" data-heic="1" title="HEIC original — click to view/process"><span>HEIC</span></button>`;
     }
-    return `<span class="pst-photo-thumb" data-full="${esc(url)}" style="cursor:pointer; display:inline-block;"><img src="${esc(url)}" loading="lazy" decoding="async" alt="photo" style="width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid var(--line);"></span>`;
+    const thumb=thumbnailUrlFor(url);
+    if(!thumb){
+      return `<button type="button" class="pst-photo-thumb pst-photo-mini" data-full="${esc(url)}" data-heic="0" title="Click to view full photo"><span class="pst-photo-placeholder" style="display:inline">IMG</span></button>`;
+    }
+    return `<button type="button" class="pst-photo-thumb pst-photo-mini" data-full="${esc(url)}" data-heic="0" title="Click to view full photo"><img src="${esc(thumb)}" loading="lazy" decoding="async" fetchpriority="low" alt="Photo thumbnail" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';"><span class="pst-photo-placeholder">IMG</span></button>`;
   }
   let heic2anyLoadPromise = null;
   function loadHeic2Any(){
@@ -1638,21 +1733,23 @@
   }
   async function fetchSquarePhotoDataUrl(url, size){
     if(!url) return null;
-    try{
-      let blob;
-      if(isHeicUrl(url)){
-        const previewUrl = await getHeicPreview(url);
-        const resp = await fetch(previewUrl);
-        blob = await resp.blob();
-      }else{
-        const resp = await fetch(url);
-        if(!resp.ok) throw new Error('fetch failed');
-        blob = await resp.blob();
-      }
-      return await blobToSquareDataUrl(blob, size);
-    }catch(e){
-      return null; // handled as "photo unavailable" by the caller
+    // Keep legacy HEIC/HEIF as a placeholder. Fetching the original HEIC here would
+    // defeat the egress optimization and require a large download just for the PDF.
+    if(isHeicUrl(url)) return null;
+
+    // New uploads have a dedicated ~720 px PDF object. If it is missing (legacy
+    // record), try the tiny thumbnail, then finally the original to preserve the
+    // existing PDF behavior for old JPG/PNG records.
+    const candidates=[pdfImageUrlFor(url), thumbnailUrlFor(url), url].filter(Boolean);
+    for(const candidate of candidates){
+      try{
+        const resp = await fetch(candidate);
+        if(!resp.ok) continue;
+        const blob = await resp.blob();
+        return await blobToSquareDataUrl(blob, size);
+      }catch(e){ /* try next candidate */ }
     }
+    return null;
   }
   async function generateRequestPdf(r, triggerEl){
     const originalContent = triggerEl ? triggerEl.textContent : null;
@@ -1733,8 +1830,8 @@
 
       // ---- Photos: two squares, side by side, no headers/labels ----
       const [nameplateData, historyData] = await Promise.all([
-        fetchSquarePhotoDataUrl(r.nameplate_photo_url, 900),
-        fetchSquarePhotoDataUrl(r.history_card_photo_url, 900)
+        fetchSquarePhotoDataUrl(r.nameplate_photo_url, 720),
+        fetchSquarePhotoDataUrl(r.history_card_photo_url, 720)
       ]);
       const boxSize = (pageW - margin*2 - 10) / 2;
       const boxes = [[nameplateData, margin], [historyData, margin + boxSize + 10]];
