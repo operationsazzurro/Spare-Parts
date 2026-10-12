@@ -1966,6 +1966,22 @@
     });
     return sorted;
   }
+  function openInStoreUpdate(r){
+    // Only users who actually have the Store Update tab can jump there
+    if(!tabsForSession().some(t=>t[0]==='store')){
+      alert('You do not have access to the Store Update tab.');
+      return;
+    }
+    // Store Update only lists approved requests
+    if(!statusEq(r.approval_status,'Approved')){
+      alert('This request is not approved yet, so it will not appear in Store Update.');
+      return;
+    }
+    pendingOpenRecordId = r.id;   // wireStoreCards() opens + scrolls to this card
+    currentTab = 'store';
+    renderTabsBar();
+    render();
+  }
   function wireOverview(){
     const tbody = document.getElementById('ov-tbody');
     const countEl = document.getElementById('ov-count');
