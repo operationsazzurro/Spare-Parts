@@ -1735,7 +1735,18 @@
     if(!url) return null;
     // Keep legacy HEIC/HEIF as a placeholder. Fetching the original HEIC here would
     // defeat the egress optimization and require a large download just for the PDF.
-    if(isHeicUrl(url)) return null;
+    if(isHeicUrl(url)){
+      // Legacy HEIC/HEIF has no -pdf/-thumb version, so convert the original to JPEG
+      // in the browser (cached in heicPreviewCache, so each photo is downloaded once per session).
+      try{
+        const objUrl = await getHeicPreview(url);
+        const blob = await (await fetch(objUrl)).blob();
+        return await blobToSquareDataUrl(blob, size);
+      }catch(e){
+        console.warn('HEIC could not be converted for PDF:', e);
+        return null;
+      }
+    }
 
     // New uploads have a dedicated ~720 px PDF object. If it is missing (legacy
     // record), try the tiny thumbnail, then finally the original to preserve the
