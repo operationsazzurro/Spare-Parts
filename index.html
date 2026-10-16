@@ -39,6 +39,11 @@
   .pst-tab.active{background:var(--panel); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.08);}
   .pst-tab:hover:not(.active){color:var(--ink);}
 
+  .pst-subtabs{display:flex; gap:8px; margin:12px 24px 0; flex-wrap:wrap;}
+  .pst-subtab{font-family:'Inter',sans-serif; font-weight:600; font-size:12.5px; padding:6px 14px; border:1px solid var(--line); background:#fff; color:var(--ink-soft); border-radius:16px; cursor:pointer; transition:all .15s;}
+  .pst-subtab:hover:not(.active){color:var(--ink); border-color:var(--accent);}
+  .pst-subtab.active{background:var(--accent); border-color:var(--accent); color:#fff;}
+  @media (max-width: 640px){ .pst-subtabs{margin:10px 14px 0; flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch;} .pst-subtab{flex-shrink:0; white-space:nowrap;} }
   .pst-body{padding:20px 24px 40px;}
   .pst-panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; margin-bottom:16px;}
   .pst-panel-title{font-family:'Oswald',sans-serif; font-size:16px; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 4px;}
@@ -210,6 +215,7 @@
   </div>
 
   <div class="pst-tabs" id="pst-tabs"></div>
+  <div class="pst-subtabs" id="pst-subtabs" style="display:none;"></div>
 
   <div class="pst-body" id="pst-body"></div>
 </div>
@@ -262,6 +268,7 @@
   const body = document.getElementById('pst-body');
   const ladderEl = document.getElementById('pst-ladder');
   const tabsEl = document.getElementById('pst-tabs');
+  const subTabsEl = document.getElementById('pst-subtabs');
   const whoamiEl = document.getElementById('pst-whoami');
   const gearBtn = document.getElementById('pst-gear');
 
@@ -282,21 +289,58 @@
     }
     return session.role === 'admin';
   }
+  // Some tabs live inside a parent tab as sub-tabs (permission keys stay the same as before).
+  const TAB_PARENT = {request:'overview', approve:'overview', asset_add:'asset_view'};
+  const TAB_PARENT_LABEL = {overview:'Overview', asset_view:'Asset Management'};
+  const SUBTAB_LABEL = {overview:'All Requests', request:'New Request', approve:'Approvals', asset_view:'All Assets', asset_add:'Add Asset'};
+  function parentOf(key){ return TAB_PARENT[key] || key; }
   function renderTabsBar(){
-    if(!session){ tabsEl.innerHTML=''; tabsEl.style.display='none'; return; }
+    if(!session){
+      tabsEl.innerHTML=''; tabsEl.style.display='none';
+      subTabsEl.innerHTML=''; subTabsEl.style.display='none';
+      return;
+    }
     tabsEl.style.display='flex';
     const tabs = tabsForSession();
     if(!tabs.find(t=>t[0]===currentTab)) currentTab = tabs[0][0];
-    tabsEl.innerHTML = tabs.map(([key,label])=>
-      `<button class="pst-tab ${key===currentTab?'active':''}" data-tab="${key}">${label}</button>`
+    const activeParent = parentOf(currentTab);
+
+    // Top-level bar: one entry per parent (children collapse into their parent)
+    const top = [];
+    tabs.forEach(([key,label])=>{
+      const p = parentOf(key);
+      if(!top.find(t=>t[0]===p)) top.push([p, TAB_PARENT_LABEL[p] || label]);
+    });
+    tabsEl.innerHTML = top.map(([key,label])=>
+      `<button class="pst-tab ${key===activeParent?'active':''}" data-tab="${key}">${label}</button>`
     ).join('');
     tabsEl.querySelectorAll('.pst-tab').forEach(btn=>{
       btn.addEventListener('click', ()=>{
-        currentTab = btn.dataset.tab;
+        const keys = tabs.filter(t=>parentOf(t[0])===btn.dataset.tab).map(t=>t[0]);
+        currentTab = keys[0];
         renderTabsBar();
         render();
       });
     });
+
+    // Sub-tab bar: only when the active parent has more than one tab the user can open
+    const subKeys = tabs.filter(t=>parentOf(t[0])===activeParent).map(t=>t[0]);
+    if(subKeys.length > 1){
+      subTabsEl.style.display = 'flex';
+      subTabsEl.innerHTML = subKeys.map(key=>
+        `<button class="pst-subtab ${key===currentTab?'active':''}" data-sub="${key}">${SUBTAB_LABEL[key] || key}</button>`
+      ).join('');
+      subTabsEl.querySelectorAll('.pst-subtab').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          currentTab = btn.dataset.sub;
+          renderTabsBar();
+          render();
+        });
+      });
+    }else{
+      subTabsEl.style.display = 'none';
+      subTabsEl.innerHTML = '';
+    }
   }
   function renderWhoami(){
     if(!session){ whoamiEl.innerHTML=''; ladderEl.style.display='none'; return; }
