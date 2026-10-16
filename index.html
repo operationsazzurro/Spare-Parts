@@ -105,6 +105,23 @@
   .pill-gray{background:var(--gray-soft); color:var(--ink-soft);}
   .pill-accent{background:var(--accent-soft); color:var(--accent);}
 
+  .pst-kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px;}
+  .pst-kpi{border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:var(--radius); padding:12px 14px; background:#fff;}
+  .pst-kpi.green{border-left-color:var(--green);} .pst-kpi.gold{border-left-color:var(--gold);} .pst-kpi.amber{border-left-color:var(--amber);} .pst-kpi.red{border-left-color:var(--red);}
+  .pst-kpi-n{font-family:'Oswald',sans-serif; font-size:28px; line-height:1.1; color:var(--ink);}
+  .pst-kpi-l{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); margin-top:4px;}
+  .pst-chart-grid{display:grid; grid-template-columns:1fr 1.4fr; gap:16px; align-items:start;}
+  .pst-chart-box{border:1px solid var(--line); border-radius:var(--radius); padding:16px; background:#fff;}
+  .pst-chart-title{font-family:'Oswald',sans-serif; font-size:14px; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 12px;}
+  .pst-bar-row{display:flex; align-items:center; gap:10px; margin:8px 0; font-size:12.5px;}
+  .pst-bar-label{width:190px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .pst-bar-track{flex:1; min-width:0; background:var(--gray-soft); border-radius:4px; height:22px; display:flex; overflow:hidden;}
+  .pst-bar-seg{height:100%; transition:width .3s;}
+  .pst-bar-val{width:100px; flex-shrink:0; text-align:right; font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--ink-soft);}
+  .pst-legend{display:flex; gap:14px; font-size:12px; color:var(--ink-soft); margin-bottom:10px;}
+  .pst-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px;}
+  @media (max-width: 900px){ .pst-chart-grid{grid-template-columns:1fr;} }
+  @media (max-width: 640px){ .pst-bar-label{width:100px;} .pst-bar-val{width:78px;} }
   .pst-empty{text-align:center; padding:40px 20px; color:var(--ink-soft);}
   .pst-empty-title{font-family:'Oswald',sans-serif; font-size:15px; text-transform:uppercase; color:var(--ink); margin-bottom:4px;}
 
@@ -221,10 +238,10 @@
     unassigned:  [['overview','Overview']],
     technician:  [['overview','Overview'],['request','New Request'],['store','Store Update']],
     approver:    [['overview','Overview'],['approve','Approvals']],
-    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['breakdown','Breakdown Register'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
+    admin:       [['overview','Overview'],['dashboard','Dashboard'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['breakdown','Breakdown Register'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
   };
-  const NAV_TAB_KEYS = new Set(['overview','request','approve','store','procurement','breakdown','admin','asset_view','asset_add']);
-  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['breakdown','Breakdown Register'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset'],['pdf_generate','Generate Request PDF (Overview)']];
+  const NAV_TAB_KEYS = new Set(['overview','dashboard','request','approve','store','procurement','breakdown','admin','asset_view','asset_add']);
+  const ALL_TABS = [['overview','Overview'],['dashboard','Dashboard'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['breakdown','Breakdown Register'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset'],['pdf_generate','Generate Request PDF (Overview)']];
   const ROLE_LABEL = {guest:'Guest', unassigned:'Pending', technician:'Technician', approver:'Approver', admin:'Admin'};
 
   const root = document.getElementById('pst-root');
@@ -868,6 +885,7 @@
     else if(currentTab==='approve'){ body.innerHTML = pendingBanner + await approveView(); wireApprove(); }
     else if(currentTab==='store'){ body.innerHTML = pendingBanner + await storeView(); wireStore(); }
     else if(currentTab==='procurement'){ body.innerHTML = pendingBanner + await procurementView(); wireProcurement(); }
+    else if(currentTab==='dashboard'){ body.innerHTML = pendingBanner + await dashboardView(); wireDashboard(); }
     else if(currentTab==='breakdown'){ body.innerHTML = pendingBanner + await breakdownView(); wireBreakdown(); }
     else if(currentTab==='admin'){ body.innerHTML = pendingBanner + await adminPanelView(); wireAdminPanel(); }
     else if(currentTab==='asset_view'){ body.innerHTML = pendingBanner + assetViewView(); wireAssetView(); }
@@ -2933,7 +2951,7 @@
   let bdSort = {key:'date', dir:-1};
   async function loadBreakdownRows(){
     // Narrow column list + paged in 1000s, so it stays light and is not capped by the API row limit.
-    const sel = 'id,request_date,site_project,machine,make,model,machine_serial,installation_status,delivery_date';
+    const sel = 'id,request_date,site_project,machine,make,model,machine_serial,approval_status,installation_status,delivery_date';
     // Same shared cutoff date as Procurement and the email reminders (notification_settings.cutoff_date)
     const cutoff = notificationCutoffDate ? '&request_date=gt.'+encodeURIComponent(notificationCutoffDate) : '';
     const STEP = 1000;
@@ -3080,6 +3098,141 @@
       const a = document.createElement('a'); const url = URL.createObjectURL(blob);
       a.href = url; a.download = 'breakdown_register.csv'; a.click();
       setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    });
+    apply();
+  }
+
+  // ---------- DASHBOARD ----------
+  // Uses the same narrow data load, shared cutoff date and breakdown grouping as the Breakdown Register.
+  // Completed = Installation status "Installed". Breakdown count = Breakdown Register rows (machine + site + date).
+  let dashShowAllSites = false;
+  async function dashboardView(){
+    await loadNotificationCutoffDate();
+    const cutoffNote = notificationCutoffDate
+      ? ` Showing requests dated after <b>${esc(fmtDate(notificationCutoffDate))}</b> (same cutoff used for reminders).`
+      : (notificationCutoffLoadError
+          ? ` <span style="color:#b45309; font-weight:600;">Shared cutoff date could not be read. Ask the Supabase admin to allow authenticated users to read the cutoff setting.</span>`
+          : '');
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Dashboard</p>
+        <p class="pst-panel-desc">Summary of spare part requests and machine breakdowns. Dates filter on the request (breakdown) date.${cutoffNote}</p>
+        <div class="pst-toolbar">
+          <select id="db-site"><option value="">All sites</option></select>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft);">From <input type="date" id="db-from"></label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft);">To <input type="date" id="db-to"></label>
+          <button class="pst-btn pst-btn-ghost" id="db-clear">Clear Filters</button>
+        </div>
+        <div id="db-body"><div class="pst-empty">Loading…</div></div>
+      </div>`;
+  }
+  async function wireDashboard(){
+    const bodyEl = document.getElementById('db-body');
+    const siteEl = document.getElementById('db-site');
+    const fromEl = document.getElementById('db-from');
+    const toEl = document.getElementById('db-to');
+    let rows, groups;
+    try{
+      rows = await loadBreakdownRows();
+      groups = groupBreakdowns(rows);
+    }catch(e){
+      bodyEl.innerHTML = `<div class="pst-msg pst-msg-err">Could not load dashboard data: ${esc(e.message)}</div>`;
+      return;
+    }
+    const siteNames = Array.from(new Set(rows.map(r=>String(r.site_project||'').trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    siteEl.innerHTML = '<option value="">All sites</option>' + siteNames.map(n=>`<option>${esc(n)}</option>`).join('');
+
+    function kpi(n, label, cls){
+      return `<div class="pst-kpi ${cls||''}"><div class="pst-kpi-n">${n}</div><div class="pst-kpi-l">${label}</div></div>`;
+    }
+    function apply(){
+      const site = siteEl.value, from = fromEl.value, to = toEl.value;
+      const inRange = d=>{
+        if(!from && !to) return true;
+        if(!d) return false;
+        if(from && d < from) return false;
+        if(to && d > to) return false;
+        return true;
+      };
+      const rowsF = rows.filter(r=> (!site || String(r.site_project||'').trim()===site) && inRange(r.request_date));
+      const grpF = groups.filter(g=> (!site || g.site===site) && inRange(g.date));
+
+      const requested = rowsF.length;
+      const approved = rowsF.filter(r=>statusEq(r.approval_status,'Approved')).length;
+      const completed = rowsF.filter(r=>statusEq(r.installation_status,'Installed')).length;
+      const bdTotal = grpF.length;
+      const bdRectified = grpF.filter(g=>g.rectified).length;
+      const bdOpen = bdTotal - bdRectified;
+      const pct = v=> requested ? Math.round(v/requested*100) : 0;
+
+      // Chart 1: request funnel
+      const maxReq = Math.max(requested, 1);
+      const funnel = [['Requested', requested, 'var(--accent)'], ['Approved', approved, 'var(--green)'], ['Completed (Installed)', completed, 'var(--gold)']];
+      const funnelHtml = funnel.map(([l,v,c])=>`
+        <div class="pst-bar-row">
+          <div class="pst-bar-label">${l}</div>
+          <div class="pst-bar-track"><div class="pst-bar-seg" style="width:${v/maxReq*100}%; background:${c};"></div></div>
+          <div class="pst-bar-val">${v} · ${pct(v)}%</div>
+        </div>`).join('');
+
+      // Chart 2: breakdown machines per site (Open vs Rectified)
+      const bySite = new Map();
+      grpF.forEach(g=>{
+        const k = g.site || '(No site)';
+        const o = bySite.get(k) || {site:k, open:0, rectified:0};
+        if(g.rectified) o.rectified++; else o.open++;
+        bySite.set(k, o);
+      });
+      const siteRows = Array.from(bySite.values())
+        .sort((a,b)=> (b.open+b.rectified)-(a.open+a.rectified) || a.site.localeCompare(b.site));
+      const LIMIT = 15;
+      const visible = dashShowAllSites ? siteRows : siteRows.slice(0, LIMIT);
+      const maxSite = Math.max(1, ...siteRows.map(o=>o.open+o.rectified));
+      const siteHtml = visible.length ? visible.map(o=>{
+        const t = o.open + o.rectified;
+        return `
+        <div class="pst-bar-row" title="${esc(o.site)} — Open: ${o.open}, Rectified: ${o.rectified}">
+          <div class="pst-bar-label">${esc(o.site)}</div>
+          <div class="pst-bar-track">
+            <div class="pst-bar-seg" style="width:${o.rectified/maxSite*100}%; background:var(--green);"></div>
+            <div class="pst-bar-seg" style="width:${o.open/maxSite*100}%; background:var(--amber);"></div>
+          </div>
+          <div class="pst-bar-val">${t} · ${o.open} open</div>
+        </div>`;
+      }).join('') : '<div class="pst-empty">No breakdowns in this period.</div>';
+      const toggleHtml = siteRows.length > LIMIT
+        ? `<div class="pst-btn-row" style="margin-top:10px;"><button class="pst-btn pst-btn-ghost pst-btn-sm" id="db-toggle-sites" style="padding:6px 12px; font-size:12px;">${dashShowAllSites ? 'Show top '+LIMIT+' only' : 'Show all '+siteRows.length+' sites'}</button></div>` : '';
+
+      bodyEl.innerHTML = `
+        <div class="pst-kpis">
+          ${kpi(requested,'Requested')}
+          ${kpi(approved,'Approved','green')}
+          ${kpi(completed,'Completed','gold')}
+          ${kpi(bdTotal,'Breakdown Machines','amber')}
+          ${kpi(bdOpen,'Open Breakdowns','red')}
+          ${kpi(bdRectified,'Rectified','green')}
+        </div>
+        <div class="pst-chart-grid">
+          <div class="pst-chart-box">
+            <p class="pst-chart-title">Spare Parts Requests</p>
+            ${funnelHtml}
+          </div>
+          <div class="pst-chart-box">
+            <p class="pst-chart-title">Breakdown Machines by Site</p>
+            <div class="pst-legend"><span><i style="background:var(--amber);"></i>Open</span><span><i style="background:var(--green);"></i>Rectified</span></div>
+            ${siteHtml}
+            ${toggleHtml}
+          </div>
+        </div>`;
+      const tg = document.getElementById('db-toggle-sites');
+      if(tg) tg.addEventListener('click', ()=>{ dashShowAllSites = !dashShowAllSites; apply(); });
+    }
+    siteEl.addEventListener('change', apply);
+    fromEl.addEventListener('change', apply);
+    toEl.addEventListener('change', apply);
+    document.getElementById('db-clear').addEventListener('click', ()=>{
+      siteEl.value = ''; fromEl.value = ''; toEl.value = '';
+      apply();
     });
     apply();
   }
