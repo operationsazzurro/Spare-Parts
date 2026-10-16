@@ -2858,6 +2858,16 @@
       submitBtn.textContent = 'Submitting…';
       msg.innerHTML = '';
       try{
+        // Duplicate check: block if an asset with the same serial number already exists
+        // (case-insensitive, ignoring leading/trailing spaces). Done before uploading photos.
+        const likeSafe = serial.replace(/[*,()]/g, ' ').replace(/[\\%_]/g, c => '\\' + c); // wildcards neutralised; exact match re-checked below
+        const found = await sb(ASSETS_TABLE+'?select=id,serial_no,site_name,machine_name&serial_no=ilike.'+encodeURIComponent(likeSafe)+'&limit=50') || [];
+        const dup = found.find(a => String(a.serial_no||'').trim().toLowerCase() === serial.toLowerCase());
+        if(dup){
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">An asset with serial number "${esc(serial)}" already exists (${esc(dup.machine_name||'machine')} at ${esc(dup.site_name||'unknown site')}). Duplicate assets are not allowed, so nothing was saved.</div>`;
+          alert(`An asset with serial number "${serial}" already exists (${dup.machine_name||'machine'} at ${dup.site_name||'unknown site'}). Nothing was saved.`);
+          return;
+        }
         let machineUrl = null, nameplateUrl = null;
         if(machineFile || nameplateFile){
           msg.innerHTML = '<div class="pst-msg pst-msg-ok">Uploading photos…</div>';
@@ -2892,7 +2902,13 @@
         clearPhotoField('as-add-photo-machine');
         clearPhotoField('as-add-photo-nameplate');
       }catch(e){
-        msg.innerHTML = `<div class="pst-msg pst-msg-err">Could not submit: ${esc(e.message)}</div>`;
+        if(/23505|duplicate key|\(409\)/i.test(String(e.message||''))){
+          const dupMsg = `An asset with serial number "${serial}" already exists. Duplicate assets are not allowed, so nothing was saved.`;
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(dupMsg)}</div>`;
+          alert(dupMsg);
+        }else{
+          msg.innerHTML = `<div class="pst-msg pst-msg-err">Could not submit: ${esc(e.message)}</div>`;
+        }
       }finally{
         submitBtn.disabled = false;
         submitBtn.textContent = 'Submit Asset';
