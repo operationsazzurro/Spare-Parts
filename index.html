@@ -221,10 +221,10 @@
     unassigned:  [['overview','Overview']],
     technician:  [['overview','Overview'],['request','New Request'],['store','Store Update']],
     approver:    [['overview','Overview'],['approve','Approvals']],
-    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
+    admin:       [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['breakdown','Breakdown Register'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset']]
   };
-  const NAV_TAB_KEYS = new Set(['overview','request','approve','store','procurement','admin','asset_view','asset_add']);
-  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset'],['pdf_generate','Generate Request PDF (Overview)']];
+  const NAV_TAB_KEYS = new Set(['overview','request','approve','store','procurement','breakdown','admin','asset_view','asset_add']);
+  const ALL_TABS = [['overview','Overview'],['request','New Request'],['approve','Approvals'],['store','Store Update'],['procurement','Procurement'],['breakdown','Breakdown Register'],['admin','Manage Users'],['asset_view','Asset Management'],['asset_add','Add Asset'],['pdf_generate','Generate Request PDF (Overview)']];
   const ROLE_LABEL = {guest:'Guest', unassigned:'Pending', technician:'Technician', approver:'Approver', admin:'Admin'};
 
   const root = document.getElementById('pst-root');
@@ -868,6 +868,7 @@
     else if(currentTab==='approve'){ body.innerHTML = pendingBanner + await approveView(); wireApprove(); }
     else if(currentTab==='store'){ body.innerHTML = pendingBanner + await storeView(); wireStore(); }
     else if(currentTab==='procurement'){ body.innerHTML = pendingBanner + await procurementView(); wireProcurement(); }
+    else if(currentTab==='breakdown'){ body.innerHTML = pendingBanner + await breakdownView(); wireBreakdown(); }
     else if(currentTab==='admin'){ body.innerHTML = pendingBanner + await adminPanelView(); wireAdminPanel(); }
     else if(currentTab==='asset_view'){ body.innerHTML = pendingBanner + assetViewView(); wireAssetView(); }
     else if(currentTab==='asset_add'){ body.innerHTML = pendingBanner + await assetAddView(); wireAssetAdd(); }
@@ -2479,6 +2480,11 @@
           installation_status: card.querySelector('.st-install').value,
           remarks: card.querySelector('.st-remarks').value.trim()
         };
+        if(payload.installation_status==='Installed' && !payload.delivery_date){
+          msgEl.innerHTML = '<div class="pst-msg pst-msg-err">Delivery Date is required before marking Installation as Installed. Nothing was saved.</div>';
+          card.querySelector('.st-date').focus();
+          return;
+        }
         try{
           await sb(PARTS_TABLE+'?id=eq.'+id, {method:'PATCH', body:payload});
           msgEl.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
@@ -2848,8 +2854,13 @@
       const machine = document.getElementById('as-add-machine').value.trim();
       const serial = document.getElementById('as-add-serial').value.trim();
       const name = requesterIdentity();
-      if(!site || !machine || !serial || !name){
-        msg.innerHTML = '<div class="pst-msg pst-msg-err">Please fill in at least Site Name, Machine Name and Serial No.</div>';
+      const missing = [];
+      if(!site) missing.push('Site Name');
+      if(!machine) missing.push('Machine Name');
+      if(!serial) missing.push('Serial No');
+      if(!name) missing.push('your account name/email (log out and back in, or ask an admin to set your name)');
+      if(missing.length){
+        msg.innerHTML = `<div class="pst-msg pst-msg-err">Missing: ${esc(missing.join(', '))}.</div>`;
         return;
       }
       const machineFile = getPhotoFieldFile('as-add-photo-machine');
@@ -2914,6 +2925,163 @@
         submitBtn.textContent = 'Submit Asset';
       }
     });
+  }
+
+  // ---------- BREAKDOWN REGISTER ----------
+  // Built from spare_parts_requests. One row per machine + site + request date.
+  // Rectified Date = latest Delivery Date, but only once EVERY request in that group is "Installed".
+  let bdSort = {key:'date', dir:-1};
+  async function loadBreakdownRows(){
+    // Narrow column list + paged in 1000s, so it stays light and is not capped by the API row limit.
+    const sel = 'id,request_date,site_project,machine,make,model,machine_serial,installation_status,delivery_date';
+    // Same shared cutoff date as Procurement and the email reminders (notification_settings.cutoff_date)
+    const cutoff = notificationCutoffDate ? '&request_date=gt.'+encodeURIComponent(notificationCutoffDate) : '';
+    const STEP = 1000;
+    let from = 0;
+    const all = [];
+    while(true){
+      const r = await sbPaged(PARTS_TABLE+'?select='+sel+cutoff+'&order=request_date.asc.nullslast,id.asc', from, from+STEP-1);
+      all.push(...r.rows);
+      if(r.rows.length < STEP) break;
+      from += STEP;
+    }
+    return all;
+  }
+  function groupBreakdowns(rows){
+    const norm = v=>String(v||'').trim().toLowerCase();
+    const map = new Map();
+    rows.forEach(r=>{
+      const key = [r.machine,r.make,r.model,r.machine_serial,r.site_project,r.request_date].map(norm).join('|');
+      let g = map.get(key);
+      if(!g){
+        g = {machine:String(r.machine||'').trim(), make:String(r.make||'').trim(), model:String(r.model||'').trim(),
+             serial:String(r.machine_serial||'').trim(), site:String(r.site_project||'').trim(),
+             date:r.request_date||'', total:0, installed:0, lastDelivery:''};
+        map.set(key,g);
+      }
+      g.total++;
+      if(statusEq(r.installation_status,'Installed')){
+        g.installed++;
+        if(r.delivery_date && r.delivery_date > g.lastDelivery) g.lastDelivery = r.delivery_date;
+      }
+    });
+    return Array.from(map.values()).map(g=>Object.assign(g, {
+      rectified: (g.installed===g.total && g.lastDelivery) ? g.lastDelivery : ''
+    }));
+  }
+  const BD_SORT_VALUE = {
+    machine: g=> [g.machine,g.make,g.model].join(' ').toLowerCase(),
+    site: g=> g.site.toLowerCase(),
+    date: g=> g.date || '',
+    rectified: g=> g.rectified || ''
+  };
+  async function breakdownView(){
+    await loadNotificationCutoffDate();
+    const cutoffNote = notificationCutoffDate
+      ? ` Showing requests dated after <b>${esc(fmtDate(notificationCutoffDate))}</b> (same cutoff used for reminders).`
+      : (notificationCutoffLoadError
+          ? ` <span style="color:#b45309; font-weight:600;">Shared cutoff date could not be read. Ask the Supabase admin to allow authenticated users to read the cutoff setting.</span>`
+          : '');
+    return `
+      <div class="pst-panel">
+        <p class="pst-panel-title">Breakdown Register</p>
+        <p class="pst-panel-desc">Machine breakdown history built from spare part requests. Breakdown Date is the date the request was raised; Rectified Date is the delivery date once all parts for that breakdown are marked Installed. Click a column heading to sort.${cutoffNote}</p>
+        <div class="pst-toolbar">
+          <input type="text" id="bd-search" placeholder="Search machine, brand, model, serial, site…">
+          <select id="bd-filter">
+            <option value="">All breakdowns</option>
+            <option value="open">Open (not rectified)</option>
+            <option value="rectified">Rectified</option>
+          </select>
+          <button class="pst-btn pst-btn-ghost" id="bd-export">Export CSV</button>
+          <span class="pst-count" id="bd-count"></span>
+        </div>
+        <div class="pst-table-scroll">
+        <table class="pst-table" style="min-width:0;">
+          <thead><tr id="bd-thead">
+            <th>Sr#</th>
+            <th class="ov-sortable" data-sort="machine">Machine Name<span class="ov-sort-arrow"></span></th>
+            <th class="ov-sortable" data-sort="site">Site Name<span class="ov-sort-arrow"></span></th>
+            <th class="ov-sortable" data-sort="date">Breakdown Date<span class="ov-sort-arrow"></span></th>
+            <th class="ov-sortable" data-sort="rectified">Rectified Date<span class="ov-sort-arrow"></span></th>
+          </tr></thead>
+          <tbody id="bd-tbody"></tbody>
+        </table>
+        </div>
+      </div>`;
+  }
+  async function wireBreakdown(){
+    const tbody = document.getElementById('bd-tbody');
+    const countEl = document.getElementById('bd-count');
+    const searchEl = document.getElementById('bd-search');
+    const filterEl = document.getElementById('bd-filter');
+    tbody.innerHTML = '<tr><td colspan="5" class="pst-empty">Loading…</td></tr>';
+    let groups;
+    try{
+      groups = groupBreakdowns(await loadBreakdownRows());
+    }catch(e){
+      tbody.innerHTML = `<tr><td colspan="5" class="pst-empty">Could not load breakdowns: ${esc(e.message)}</td></tr>`;
+      return;
+    }
+    let shown = [];
+    function updateSortArrows(){
+      document.querySelectorAll('#bd-thead .ov-sortable').forEach(th=>{
+        const active = th.dataset.sort === bdSort.key;
+        th.classList.toggle('ov-sorted', active);
+        th.querySelector('.ov-sort-arrow').textContent = active ? (bdSort.dir===1 ? ' ▲' : ' ▼') : '';
+      });
+    }
+    function apply(){
+      const q = searchEl.value.trim().toLowerCase();
+      const f = filterEl.value;
+      shown = groups.filter(g=>{
+        if(f==='open' && g.rectified) return false;
+        if(f==='rectified' && !g.rectified) return false;
+        if(q && ![g.machine,g.make,g.model,g.serial,g.site].join(' ').toLowerCase().includes(q)) return false;
+        return true;
+      });
+      const getVal = BD_SORT_VALUE[bdSort.key];
+      shown.sort((a,b)=>{
+        const av = getVal(a), bv = getVal(b);
+        if(av < bv) return -1 * bdSort.dir;
+        if(av > bv) return 1 * bdSort.dir;
+        return 0;
+      });
+      if(!shown.length){
+        tbody.innerHTML = '<tr><td colspan="5" class="pst-empty">No matching breakdowns.</td></tr>';
+      }else{
+        tbody.innerHTML = shown.map((g,i)=>{
+          const sub = [g.make, g.model].filter(Boolean).join(' · ') + (g.serial ? (g.make||g.model ? ' · ' : '') + 'SN: ' + g.serial : '');
+          return `<tr>
+            <td class="pst-mono">${i+1}</td>
+            <td>${esc(g.machine||'—')}${sub ? `<br><span style="color:var(--ink-soft); font-size:11px;">${esc(sub)}</span>` : ''}</td>
+            <td>${esc(g.site||'—')}</td>
+            <td>${fmtDate(g.date)}</td>
+            <td>${g.rectified ? fmtDate(g.rectified) : '<span class="pill pill-amber">Open</span>'}</td>
+          </tr>`;
+        }).join('');
+      }
+      countEl.textContent = shown.length + ' of ' + groups.length + ' breakdowns';
+      updateSortArrows();
+    }
+    searchEl.addEventListener('input', apply);
+    filterEl.addEventListener('change', apply);
+    document.querySelectorAll('#bd-thead .ov-sortable').forEach(th=>th.addEventListener('click', ()=>{
+      const key = th.dataset.sort;
+      if(bdSort.key===key) bdSort.dir *= -1; else bdSort = {key, dir:1};
+      apply();
+    }));
+    document.getElementById('bd-export').addEventListener('click', ()=>{
+      const cols = ['Sr#','Machine Name','Brand','Model','Serial No','Site Name','Breakdown Date','Rectified Date'];
+      const q = v=>{ const t = String(v==null?'':v).replace(/"/g,'""'); return /[,"\n]/.test(t) ? `"${t}"` : t; };
+      const lines = [cols.join(',')];
+      shown.forEach((g,i)=>lines.push([i+1,g.machine,g.make,g.model,g.serial,g.site,g.date,g.rectified].map(q).join(',')));
+      const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+      const a = document.createElement('a'); const url = URL.createObjectURL(blob);
+      a.href = url; a.download = 'breakdown_register.csv'; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    });
+    apply();
   }
 
   // ---------- init ----------
