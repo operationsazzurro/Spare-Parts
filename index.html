@@ -105,6 +105,20 @@
   .pill-gray{background:var(--gray-soft); color:var(--ink-soft);}
   .pill-accent{background:var(--accent-soft); color:var(--accent);}
 
+  .pst-modal{position:fixed; inset:0; z-index:320; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(10,16,22,0.45); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px);}
+  .pst-modal-panel{position:relative; width:min(1000px,100%); max-height:88vh; overflow:auto; background:rgba(255,255,255,0.86); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,0.65); border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.35); padding:22px;}
+  .pst-modal-close{position:sticky; top:0; float:right; z-index:2; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:rgba(255,255,255,0.95); cursor:pointer; font-size:15px; color:var(--ink-soft); line-height:1;}
+  .pst-modal-close:hover{color:var(--ink); border-color:var(--accent);}
+  .pst-modal-title{font-family:'Oswald',sans-serif; font-size:22px; text-transform:uppercase; letter-spacing:0.5px; margin:0 40px 2px 0;}
+  .pst-modal-sub{color:var(--ink-soft); font-size:13px; margin:0 0 14px;}
+  .pst-chips{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;}
+  .pst-chip{background:rgba(255,255,255,0.75); border:1px solid var(--line); border-radius:8px; padding:8px 12px; min-width:110px;}
+  .pst-chip b{display:block; font-family:'Oswald',sans-serif; font-size:20px; font-weight:600;}
+  .pst-chip span{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft);}
+  .pst-bd-block{background:rgba(255,255,255,0.6); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:12px;}
+  .pst-bd-head{display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; font-size:13px;}
+  .db-freq-row{cursor:pointer;} .db-freq-row:hover td{background:var(--accent-soft) !important;}
+  @media (max-width: 640px){ .pst-modal{padding:8px;} .pst-modal-panel{padding:14px; max-height:92vh;} }
   .pst-kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px;}
   .pst-kpi{border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:var(--radius); padding:12px 14px; background:#fff;}
   .pst-kpi.green{border-left-color:var(--green);} .pst-kpi.gold{border-left-color:var(--gold);} .pst-kpi.amber{border-left-color:var(--amber);} .pst-kpi.red{border-left-color:var(--red);}
@@ -829,9 +843,13 @@
   async function refreshLadderCounts(force=false){
     if(!force && ladderLoadedAt && Date.now()-ladderLoadedAt < DATA_CACHE_TTL_MS) return;
     try{
+      // Same shared cutoff date as Procurement, Breakdown Register, Dashboard and the email reminders
+      await loadNotificationCutoffDate();
+      const cf = notificationCutoffDate ? 'request_date=gt.'+encodeURIComponent(notificationCutoffDate) : '';
+      const withCutoff = f => [f, cf].filter(Boolean).join('&');
       const [total,approved,delivered,installed] = await Promise.all([
-        sbCount(), sbCount('approval_status=ilike.Approved'),
-        sbCount('delivery_status=ilike.Delivered'), sbCount('installation_status=ilike.Installed')
+        sbCount(withCutoff('')), sbCount(withCutoff('approval_status=ilike.Approved')),
+        sbCount(withCutoff('delivery_status=ilike.Delivered')), sbCount(withCutoff('installation_status=ilike.Installed'))
       ]);
       ladderCounts={total,approved,delivered,installed}; ladderLoadedAt=Date.now();
     }catch(e){ console.warn('Could not refresh ladder counts:', e); }
@@ -1301,6 +1319,7 @@
           recipient_emails: recipients, pr_recipient_emails: prRecipients, delivery_recipient_emails: deliveryRecipients,
           approval_enabled: approvalEnabled, pr_enabled: prEnabled, delivery_enabled: deliveryEnabled
         }});
+        ladderLoadedAt = 0; // header counts pick up the new cutoff on the next refresh
         msg.innerHTML = '<div class="pst-msg pst-msg-ok">Saved.</div>';
       }catch(e){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
@@ -2889,7 +2908,7 @@
       try{
         // Duplicate check: block if an asset with the same serial number already exists
         // (case-insensitive, ignoring leading/trailing spaces). Done before uploading photos.
-        const likeSafe = serial.replace(/[*,()]/g, ' ').replace(/[\\%_]/g, c => '\\' + c); // wildcards neutralised; exact match re-checked below
+        const likeSafe = serial.replace(/[\\%_]/g, c => '\\' + c); // escape LIKE wildcards; exact match re-checked below
         const found = await sb(ASSETS_TABLE+'?select=id,serial_no,site_name,machine_name&serial_no=ilike.'+encodeURIComponent(likeSafe)+'&limit=50') || [];
         const dup = found.find(a => String(a.serial_no||'').trim().toLowerCase() === serial.toLowerCase());
         if(dup){
@@ -3106,6 +3125,8 @@
   // Uses the same narrow data load, shared cutoff date and breakdown grouping as the Breakdown Register.
   // Completed = Installation status "Installed". Breakdown count = Breakdown Register rows (machine + site + date).
   let dashShowAllSites = false;
+  let dashShowAllFreq = false;
+  const FREQ_MIN = 2; // a machine is 'frequent' once it has this many breakdowns in the period
   async function dashboardView(){
     await loadNotificationCutoffDate();
     const cutoffNote = notificationCutoffDate
@@ -3203,6 +3224,44 @@
       const toggleHtml = siteRows.length > LIMIT
         ? `<div class="pst-btn-row" style="margin-top:10px;"><button class="pst-btn pst-btn-ghost pst-btn-sm" id="db-toggle-sites" style="padding:6px 12px; font-size:12px;">${dashShowAllSites ? 'Show top '+LIMIT+' only' : 'Show all '+siteRows.length+' sites'}</button></div>` : '';
 
+      // Frequent breakdowns: machines (machine + make + model + serial + site) with FREQ_MIN or more breakdowns
+      const normK = v=>String(v||'').trim().toLowerCase();
+      const byMachine = new Map();
+      grpF.forEach(g=>{
+        const k = [g.machine,g.make,g.model,g.serial,g.site].map(normK).join('|');
+        const o = byMachine.get(k) || {machine:g.machine, make:g.make, model:g.model, serial:g.serial, site:g.site, count:0, open:0, last:''};
+        o.count++;
+        if(!g.rectified) o.open++;
+        if(g.date && g.date > o.last) o.last = g.date;
+        byMachine.set(k, o);
+      });
+      const freqAll = Array.from(byMachine.values()).filter(o=>o.count >= FREQ_MIN)
+        .sort((a,b)=> b.count-a.count || (b.last||'').localeCompare(a.last||'') || a.machine.localeCompare(b.machine));
+      const FREQ_LIMIT = 10;
+      const freq = dashShowAllFreq ? freqAll : freqAll.slice(0, FREQ_LIMIT);
+      const maxCount = Math.max(1, ...freqAll.map(o=>o.count));
+      const freqRows = freq.map((o,i)=>{
+        const sub = [o.make, o.model].filter(Boolean).join(' · ') + (o.serial ? ((o.make||o.model) ? ' · ' : '') + 'SN: ' + o.serial : '');
+        return `<tr class="db-freq-row" data-i="${i}" title="Click for machine details">
+          <td class="pst-mono">${i+1}</td>
+          <td><b>${esc(o.machine||'—')}</b>${sub ? `<br><span style="color:var(--ink-soft); font-size:11px;">${esc(sub)}</span>` : ''}</td>
+          <td>${esc(o.site||'—')}</td>
+          <td><div style="display:flex; align-items:center; gap:8px;"><b style="min-width:22px;">${o.count}</b><div class="pst-bar-track" style="height:10px; max-width:140px;"><div class="pst-bar-seg" style="width:${o.count/maxCount*100}%; background:var(--red);"></div></div></div></td>
+          <td>${o.open ? `<span class="pill pill-amber">${o.open} open</span>` : '<span class="pill pill-green">All rectified</span>'}</td>
+          <td>${fmtDate(o.last)}</td>
+        </tr>`;
+      }).join('');
+      const freqToggle = freqAll.length > FREQ_LIMIT
+        ? `<div class="pst-btn-row" style="margin-top:10px;"><button class="pst-btn pst-btn-ghost pst-btn-sm" id="db-toggle-freq" style="padding:6px 12px; font-size:12px;">${dashShowAllFreq ? 'Show top '+FREQ_LIMIT+' only' : 'Show all '+freqAll.length+' machines'}</button></div>` : '';
+      const freqHtml = `
+        <div class="pst-chart-box" style="margin-top:16px;">
+          <p class="pst-chart-title">Frequent Breakdowns</p>
+          <p class="pst-panel-desc" style="margin:-4px 0 10px;">Machines with ${FREQ_MIN} or more breakdowns in the selected period, most frequent first. Click a machine to see its full history.</p>
+          ${freqAll.length ? `<div class="pst-table-scroll" style="max-height:none;"><table class="pst-table" style="min-width:640px;">
+            <thead><tr><th>Sr#</th><th>Machine</th><th>Site</th><th>Breakdown Count</th><th>Status</th><th>Last Breakdown</th></tr></thead>
+            <tbody>${freqRows}</tbody></table></div>${freqToggle}` : '<div class="pst-empty">No machine has had repeated breakdowns in this period.</div>'}
+        </div>`;
+
       bodyEl.innerHTML = `
         <div class="pst-kpis">
           ${kpi(requested,'Requested')}
@@ -3223,9 +3282,15 @@
             ${siteHtml}
             ${toggleHtml}
           </div>
-        </div>`;
+        </div>
+        ${freqHtml}`;
       const tg = document.getElementById('db-toggle-sites');
       if(tg) tg.addEventListener('click', ()=>{ dashShowAllSites = !dashShowAllSites; apply(); });
+      const tf = document.getElementById('db-toggle-freq');
+      if(tf) tf.addEventListener('click', ()=>{ dashShowAllFreq = !dashShowAllFreq; apply(); });
+      bodyEl.querySelectorAll('.db-freq-row').forEach(tr=>tr.addEventListener('click', ()=>{
+        openMachineModal(freq[Number(tr.dataset.i)], from, to);
+      }));
     }
     siteEl.addEventListener('change', apply);
     fromEl.addEventListener('change', apply);
@@ -3235,6 +3300,109 @@
       apply();
     });
     apply();
+  }
+
+  // ---------- MACHINE DETAIL POPUP (Dashboard) ----------
+  function ilikeVal(v){ return encodeURIComponent(String(v).replace(/[\\%_]/g, c=>'\\'+c)); }
+  function closeMachineModal(){
+    const m = document.getElementById('pst-machine-modal');
+    if(m) m.remove();
+    document.removeEventListener('keydown', machineModalEsc);
+  }
+  function machineModalEsc(e){ if(e.key==='Escape') closeMachineModal(); }
+  async function openMachineModal(m, from, to){
+    if(!m) return;
+    closeMachineModal();
+    const ov = document.createElement('div');
+    ov.id = 'pst-machine-modal';
+    ov.className = 'pst-modal';
+    ov.innerHTML = `<div class="pst-modal-panel"><button class="pst-modal-close" aria-label="Close">✕</button><div class="pst-modal-body"><div class="pst-empty">Loading machine history…</div></div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e=>{ if(e.target===ov) closeMachineModal(); });
+    ov.querySelector('.pst-modal-close').addEventListener('click', closeMachineModal);
+    document.addEventListener('keydown', machineModalEsc);
+    const bodyEl = ov.querySelector('.pst-modal-body');
+    try{
+      // Detail is fetched only when a machine is clicked: only that machine's requests, same cutoff + date range as the dashboard.
+      const sel = 'id,request_date,site_project,machine,make,model,machine_serial,parts,quantity,priority,reason,requested_by,approval_status,approved_by,pr_no,lpo_no,delivery_status,do_no,delivery_date,received_person,installation_status,remarks';
+      let path = PARTS_TABLE+'?select='+sel;
+      if(notificationCutoffDate) path += '&request_date=gt.'+encodeURIComponent(notificationCutoffDate);
+      if(from) path += '&request_date=gte.'+encodeURIComponent(from);
+      if(to) path += '&request_date=lte.'+encodeURIComponent(to);
+      if(m.site) path += '&site_project=ilike.'+ilikeVal(m.site);
+      if(m.machine) path += '&machine=ilike.'+ilikeVal(m.machine);
+      path += '&order=request_date.desc.nullslast,id.asc';
+      const all = await sb(path) || [];
+      const norm = v=>String(v||'').trim().toLowerCase();
+      const list = all.filter(r=> norm(r.machine)===norm(m.machine) && norm(r.make)===norm(m.make) && norm(r.model)===norm(m.model)
+        && norm(r.machine_serial)===norm(m.serial) && norm(r.site_project)===norm(m.site));
+
+      const byDate = new Map();
+      list.forEach(r=>{ const k = r.request_date || ''; if(!byDate.has(k)) byDate.set(k, []); byDate.get(k).push(r); });
+      const events = Array.from(byDate.entries()).map(([date, items])=>{
+        const allInstalled = items.every(r=>statusEq(r.installation_status,'Installed'));
+        let last = '';
+        items.forEach(r=>{ if(statusEq(r.installation_status,'Installed') && r.delivery_date && r.delivery_date > last) last = r.delivery_date; });
+        const rectified = (allInstalled && last) ? last : '';
+        let days = null;
+        if(rectified && date){
+          const d = Math.round((new Date(rectified) - new Date(date)) / 86400000);
+          if(!isNaN(d)) days = d;
+        }
+        return {date, items, rectified, days};
+      }).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+
+      const openCount = events.filter(e=>!e.rectified).length;
+      const partsQty = list.reduce((sum,r)=> sum + (Number(r.quantity)||0), 0);
+      const dayVals = events.map(e=>e.days).filter(d=>d!==null);
+      const avgDays = dayVals.length ? (dayVals.reduce((a,b)=>a+b,0)/dayVals.length).toFixed(1) : '—';
+      const sub = [m.make, m.model].filter(Boolean).join(' · ') + (m.serial ? ((m.make||m.model) ? ' · ' : '') + 'SN: ' + m.serial : '');
+      const chip = (n,l)=>`<div class="pst-chip"><b>${n}</b><span>${l}</span></div>`;
+
+      const blocks = events.map((e,i)=>`
+        <div class="pst-bd-block">
+          <div class="pst-bd-head">
+            <span><b>Breakdown #${events.length - i}</b> · ${esc(fmtDate(e.date))}</span>
+            <span>${e.rectified
+              ? `<span class="pill pill-green">Rectified ${esc(fmtDate(e.rectified))}</span>${e.days!==null ? ` <span style="color:var(--ink-soft); font-size:12px;">${e.days} day${e.days===1?'':'s'}</span>` : ''}`
+              : '<span class="pill pill-amber">Open</span>'}</span>
+          </div>
+          <div style="overflow-x:auto;">
+          <table class="pst-table" style="min-width:900px;">
+            <thead><tr><th>Parts</th><th>Qty</th><th>Priority</th><th>Requested By</th><th>Reason</th><th>Approval</th><th>PR No.</th><th>Delivery</th><th>Installation</th><th>Remarks</th></tr></thead>
+            <tbody>${e.items.map(r=>`
+              <tr>
+                <td>${esc(r.parts||'—')}</td>
+                <td>${esc(r.quantity)}</td>
+                <td>${priorityPill(r.priority)}</td>
+                <td>${esc(r.requested_by||'—')}</td>
+                <td style="max-width:200px; white-space:pre-wrap;">${esc(r.reason||'—')}</td>
+                <td>${approvalPill(r.approval_status)}</td>
+                <td class="pst-mono">${prNoLink(r.pr_no)}</td>
+                <td>${deliveryPill(r.delivery_status)}${r.delivery_date ? `<br><span style="color:var(--ink-soft); font-size:11px;">${esc(fmtDate(r.delivery_date))}</span>` : ''}</td>
+                <td>${installPill(r.installation_status)}</td>
+                <td style="max-width:200px; white-space:pre-wrap;">${esc(r.remarks||'—')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          </div>
+        </div>`).join('');
+
+      bodyEl.innerHTML = `
+        <p class="pst-modal-title">${esc(m.machine||'Machine')}</p>
+        <p class="pst-modal-sub">${sub ? esc(sub)+' · ' : ''}${esc(m.site||'—')}${(from||to) ? ' · period: '+esc(from||'start')+' to '+esc(to||'today') : ''}</p>
+        <div class="pst-chips">
+          ${chip(events.length,'Breakdowns')}
+          ${chip(openCount,'Open')}
+          ${chip(events.length-openCount,'Rectified')}
+          ${chip(list.length,'Part Requests')}
+          ${chip(partsQty,'Total Qty')}
+          ${chip(avgDays,'Avg. Days to Rectify')}
+        </div>
+        ${blocks || '<div class="pst-empty">No requests found for this machine.</div>'}`;
+    }catch(e){
+      bodyEl.innerHTML = `<div class="pst-msg pst-msg-err">Could not load machine details: ${esc(e.message)}</div>`;
+    }
   }
 
   // ---------- init ----------
