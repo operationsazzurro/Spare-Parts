@@ -649,7 +649,7 @@
     const href = PROCUREMENT_URL + encodeURIComponent(prNo.trim());
     return `<a href="${esc(href)}" target="_blank" rel="noopener" class="pst-pr-link" title="Open in Procurement software">${esc(prNo)}</a>`;
   }
-  async function optimizePhotoForUpload(file, maxDimension=1600, quality=0.78){
+  async function optimizePhotoForUpload(file, maxDimension=720, quality=0.8){ // one full-size image (720 px) + one thumbnail
     if(!file) return null;
     const type = (file.type || '').toLowerCase();
     const ext = (file.name.split('.').pop() || '').toLowerCase();
@@ -759,10 +759,12 @@
     if(!file) return null;
     const optimized = await optimizePhotoForUpload(file);
     const token = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-    const path = `${token}.${optimized.ext}`;
+    const isJpeg = optimized.ext === 'jpg' && optimized.type === 'image/jpeg';
+    // JPEG uploads are stored as two files only: <token>-pdf.jpg (720 px: viewer, download and PDF) and <token>-thumb.jpg (240 px).
+    const path = isJpeg ? `${token}-pdf.jpg` : `${token}.${optimized.ext}`;
 
-    // Upload the optimized full/preview image first. New JPG/PNG/HEIC uploads are
-    // normally converted to a compact JPEG (max 1600 px) before reaching Storage.
+    // Upload the optimized image first. New JPG/PNG/HEIC uploads are
+    // normally converted to a compact JPEG (max 720 px) before reaching Storage.
     await uploadStorageObject(path, optimized.blob, optimized.type);
 
     // Store a physically separate tiny JPEG thumbnail. Overview uses this object,
@@ -774,14 +776,8 @@
         // Tiny list thumbnail: lowest egress for Overview/table rendering.
         const thumbBlob = await makeThumbnailBlob(optimized.blob, 240, 0.66);
         await uploadStorageObject(`${token}-thumb.jpg`, thumbBlob, 'image/jpeg');
-
-        // Dedicated PDF image: large enough for a clear A4 request form, but much
-        // smaller than the 1600 px full/preview image. PDF generation requests this
-        // object first, so routine PDF creation does not fetch the full image.
-        const pdfBlob = await makeThumbnailBlob(optimized.blob, 720, 0.72);
-        await uploadStorageObject(`${token}-pdf.jpg`, pdfBlob, 'image/jpeg');
       }catch(e){
-        console.warn('Thumbnail/PDF image upload skipped; full image remains available.', e);
+        console.warn('Thumbnail upload skipped; full image remains available.', e);
       }
     }
     return R2_ENABLED ? `${PHOTO_PUBLIC_BASE}/${path}` : `${config.url}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
@@ -799,9 +795,9 @@
     if(!path) return;
     try{
       const paths=[path];
-      if(/\.(jpg|jpeg)$/i.test(path) && !/-(thumb|pdf)\.jpg$/i.test(path)){
-        paths.push(path.replace(/\.(jpg|jpeg)$/i,'-thumb.jpg'));
-        paths.push(path.replace(/\.(jpg|jpeg)$/i,'-pdf.jpg'));
+      if(/\.(jpg|jpeg)$/i.test(path) && !/-thumb\.jpg$/i.test(path)){
+        const stem = path.replace(/(-pdf)?\.(jpg|jpeg)$/i,'');
+        [stem+'.jpg', stem+'-thumb.jpg', stem+'-pdf.jpg'].forEach(v=>{ if(!paths.includes(v)) paths.push(v); }); // missing variants are harmless no-ops
       }
       await Promise.all(paths.map(p=> isR2Url(url)
         ? fetch(`${PHOTO_WORKER_URL}/delete?key=${encodeURIComponent(p)}`, {
@@ -1733,7 +1729,7 @@
     const base=qIndex>=0 ? clean.slice(0,qIndex) : clean;
     const query=qIndex>=0 ? clean.slice(qIndex) : '';
     if(!/\.(jpg|jpeg|png|webp)$/i.test(base)) return null;
-    return base.replace(/\.(jpg|jpeg|png|webp)$/i,'-thumb.jpg') + query + hash;
+    return base.replace(/(-pdf)?\.(jpg|jpeg|png|webp)$/i,'-thumb.jpg') + query + hash;
   }
   function pdfImageUrlFor(url){
     if(!url || isHeicUrl(url)) return null;
@@ -1743,6 +1739,7 @@
     const base=qIndex>=0 ? clean.slice(0,qIndex) : clean;
     const query=qIndex>=0 ? clean.slice(qIndex) : '';
     if(!/\.(jpg|jpeg|png|webp)$/i.test(base)) return null;
+    if(/-pdf\.jpg$/i.test(base)) return url;
     return base.replace(/\.(jpg|jpeg|png|webp)$/i,'-pdf.jpg') + query + hash;
   }
   function photoThumb(url){
@@ -1858,7 +1855,7 @@
     // New uploads have a dedicated ~720 px PDF object. If it is missing (legacy
     // record), try the tiny thumbnail, then finally the original to preserve the
     // existing PDF behavior for old JPG/PNG records.
-    const candidates=[pdfImageUrlFor(url), thumbnailUrlFor(url), url].filter(Boolean);
+    const candidates=[pdfImageUrlFor(url), url, thumbnailUrlFor(url)].filter((c,i,a)=>c && a.indexOf(c)===i);
     for(const candidate of candidates){
       try{
         const resp = await fetch(candidate);
