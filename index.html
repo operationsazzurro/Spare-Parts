@@ -1719,7 +1719,7 @@
     return /\.(heic|heif)(\?|#|$)/i.test(url||'');
   }
   function thumbnailUrlFor(url){
-    if(!url || isHeicUrl(url)) return null;
+    if(!url) return null;
     // New uploads use <original-name>-thumb.jpg. Existing pre-optimization images
     // may not have this object; a tiny 404 then becomes an IMG placeholder without
     // falling back to the large original (which would defeat the egress saving).
@@ -1728,24 +1728,26 @@
     const qIndex=clean.indexOf('?');
     const base=qIndex>=0 ? clean.slice(0,qIndex) : clean;
     const query=qIndex>=0 ? clean.slice(qIndex) : '';
-    if(!/\.(jpg|jpeg|png|webp)$/i.test(base)) return null;
-    return base.replace(/(-pdf)?\.(jpg|jpeg|png|webp)$/i,'-thumb.jpg') + query + hash;
+    if(!/\.(jpg|jpeg|png|webp|heic|heif)$/i.test(base)) return null;
+    return base.replace(/(-pdf)?\.(jpg|jpeg|png|webp|heic|heif)$/i,'-thumb.jpg') + query + hash;
   }
   function pdfImageUrlFor(url){
-    if(!url || isHeicUrl(url)) return null;
+    if(!url) return null;
     const clean=url.split('#')[0];
     const hash=url.includes('#') ? '#'+url.split('#').slice(1).join('#') : '';
     const qIndex=clean.indexOf('?');
     const base=qIndex>=0 ? clean.slice(0,qIndex) : clean;
     const query=qIndex>=0 ? clean.slice(qIndex) : '';
-    if(!/\.(jpg|jpeg|png|webp)$/i.test(base)) return null;
+    if(!/\.(jpg|jpeg|png|webp|heic|heif)$/i.test(base)) return null;
     if(/-pdf\.jpg$/i.test(base)) return url;
-    return base.replace(/\.(jpg|jpeg|png|webp)$/i,'-pdf.jpg') + query + hash;
+    return base.replace(/\.(jpg|jpeg|png|webp|heic|heif)$/i,'-pdf.jpg') + query + hash;
   }
   function photoThumb(url){
     if(!url) return '<span style="color:var(--ink-soft);">—</span>';
     if(isHeicUrl(url)){
-      return `<button type="button" class="pst-photo-thumb pst-photo-mini pst-photo-heic" data-full="${esc(url)}" data-heic="1" title="HEIC original — click to view/process"><span>HEIC</span></button>`;
+      // Use the JPEG thumbnail (made by the backfill script / at upload) when it exists, otherwise show the HEIC label
+      const heicThumb=thumbnailUrlFor(url);
+      return `<button type="button" class="pst-photo-thumb pst-photo-mini pst-photo-heic" data-full="${esc(url)}" data-heic="1" title="HEIC original — click to view"><img src="${esc(heicThumb)}" loading="lazy" decoding="async" fetchpriority="low" alt="Photo thumbnail" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';"><span class="pst-photo-placeholder">HEIC</span></button>`;
     }
     const thumb=thumbnailUrlFor(url);
     if(!thumb){
@@ -1840,8 +1842,16 @@
     // Keep legacy HEIC/HEIF as a placeholder. Fetching the original HEIC here would
     // defeat the egress optimization and require a large download just for the PDF.
     if(isHeicUrl(url)){
-      // Legacy HEIC/HEIF has no -pdf/-thumb version, so convert the original to JPEG
-      // in the browser (cached in heicPreviewCache, so each photo is downloaded once per session).
+      // Prefer the small JPEG version (-pdf.jpg) made by the backfill script: no conversion needed.
+      const heicQuick = pdfImageUrlFor(url);
+      if(heicQuick){
+        try{
+          const resp = await fetch(heicQuick);
+          if(resp.ok) return await blobToSquareDataUrl(await resp.blob(), size);
+        }catch(e){ /* fall through to browser conversion */ }
+      }
+      // No JPEG version yet: convert the original to JPEG in the browser
+      // (cached in heicPreviewCache, so each photo is downloaded once per session).
       try{
         const objUrl = await getHeicPreview(url);
         const blob = await (await fetch(objUrl)).blob();
@@ -2020,10 +2030,20 @@
       lbLoading.style.display = 'none';
     };
     if(isHeic){
-      getHeicPreview(url).then(showImg).catch(()=>{
+      const convertOriginal = ()=> getHeicPreview(url).then(showImg).catch(()=>{
         if(lightboxUrl!==url) return;
         lbLoading.textContent = "Could not preview this HEIC photo, but you can still download the original below.";
       });
+      // Fast path: the 720 px JPEG version, if it exists. Download still gives the original HEIC.
+      const quick = pdfImageUrlFor(url);
+      if(quick){
+        const im = new Image();
+        im.onload = ()=> showImg(quick);
+        im.onerror = convertOriginal;
+        im.src = quick;
+      }else{
+        convertOriginal();
+      }
     }else{
       showImg(url);
     }
