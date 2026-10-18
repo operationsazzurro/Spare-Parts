@@ -2912,6 +2912,9 @@
   }
 
   // ---------- ADD ASSET (Technician / customizable) ----------
+  // Serial numbers meaning "not available": never treated as duplicates (keep in sync with asset_duplicate_rule.sql)
+  const NA_SERIAL_RE = /^(na|n\/a|n\.a|-+|none|nil|unknown|null)$/i;
+  function isNaSerial(v){ return NA_SERIAL_RE.test(String(v||'').trim()); }
   async function assetAddView(){
     const name = requesterIdentity();
     const siteOptions = sites.length
@@ -2938,7 +2941,7 @@
             </select>
           </div>
           <div class="pst-field"><label>Model No</label><input type="text" id="as-add-model"></div>
-          <div class="pst-field"><label>Serial No</label><input type="text" id="as-add-serial"></div>
+          <div class="pst-field"><label>Serial No (NA if not available)</label><input type="text" id="as-add-serial" value="NA"></div>
           <div class="pst-field"><label>Year of Installation</label><input type="number" id="as-add-year" min="1980" max="2100" placeholder="e.g. 2023"></div>
           <div class="pst-field"><label>Date of Last Service</label><input type="date" id="as-add-lastservice"></div>
           <div class="pst-field"><label>Technician Name</label><input type="text" id="as-add-tech" value="${esc(name)}" readonly style="background:var(--gray-soft); cursor:not-allowed;"></div>
@@ -2963,7 +2966,7 @@
       document.getElementById('as-add-barcode').value = '';
       document.getElementById('as-add-machine').value = '';
       document.getElementById('as-add-model').value = '';
-      document.getElementById('as-add-serial').value = '';
+      document.getElementById('as-add-serial').value = 'NA';
       document.getElementById('as-add-year').value = '';
       document.getElementById('as-add-lastservice').value = '';
       clearPhotoField('as-add-photo-machine');
@@ -2975,12 +2978,12 @@
       const submitBtn = document.getElementById('as-add-submit');
       const site = document.getElementById('as-add-site').value.trim();
       const machine = document.getElementById('as-add-machine').value.trim();
-      const serial = document.getElementById('as-add-serial').value.trim();
+      const serial = document.getElementById('as-add-serial').value.trim() || 'NA'; // blank means NA
+      const modelNo = document.getElementById('as-add-model').value.trim();
       const name = requesterIdentity();
       const missing = [];
       if(!site) missing.push('Site Name');
       if(!machine) missing.push('Machine Name');
-      if(!serial) missing.push('Serial No');
       if(!name) missing.push('your account name/email (log out and back in, or ask an admin to set your name)');
       if(missing.length){
         msg.innerHTML = `<div class="pst-msg pst-msg-err">Missing: ${esc(missing.join(', '))}.</div>`;
@@ -2992,15 +2995,19 @@
       submitBtn.textContent = 'Submitting…';
       msg.innerHTML = '';
       try{
-        // Duplicate check: block if an asset with the same serial number already exists
-        // (case-insensitive, ignoring leading/trailing spaces). Done before uploading photos.
-        const likeSafe = serial.replace(/[\\%_]/g, c => '\\' + c); // escape LIKE wildcards; exact match re-checked below
-        const found = await sb(ASSETS_TABLE+'?select=id,serial_no,site_name,machine_name&serial_no=ilike.'+encodeURIComponent(likeSafe)+'&limit=50') || [];
-        const dup = found.find(a => String(a.serial_no||'').trim().toLowerCase() === serial.toLowerCase());
-        if(dup){
-          msg.innerHTML = `<div class="pst-msg pst-msg-err">An asset with serial number "${esc(serial)}" already exists (${esc(dup.machine_name||'machine')} at ${esc(dup.site_name||'unknown site')}). Duplicate assets are not allowed, so nothing was saved.</div>`;
-          alert(`An asset with serial number "${serial}" already exists (${dup.machine_name||'machine'} at ${dup.site_name||'unknown site'}). Nothing was saved.`);
-          return;
+        // Duplicate check on Model No + Serial No together (case-insensitive, spaces ignored).
+        // A serial of "NA" (not available) is never treated as a duplicate. Done before uploading photos.
+        if(!isNaSerial(serial)){
+          const likeSafe = serial.replace(/[\\%_]/g, c => '\\' + c); // escape LIKE wildcards; exact match re-checked below
+          const found = await sb(ASSETS_TABLE+'?select=id,serial_no,model_no,site_name,machine_name&serial_no=ilike.'+encodeURIComponent(likeSafe)+'&limit=50') || [];
+          const norm = v=>String(v||'').trim().toLowerCase();
+          const dup = found.find(a => norm(a.serial_no)===norm(serial) && norm(a.model_no)===norm(modelNo));
+          if(dup){
+            const where = `${dup.machine_name||'machine'} at ${dup.site_name||'unknown site'}`;
+            msg.innerHTML = `<div class="pst-msg pst-msg-err">An asset with Model No "${esc(modelNo||'(blank)')}" and Serial No "${esc(serial)}" already exists (${esc(where)}). Duplicate assets are not allowed, so nothing was saved.</div>`;
+            alert(`An asset with Model No "${modelNo||'(blank)'}" and Serial No "${serial}" already exists (${where}). Nothing was saved.`);
+            return;
+          }
         }
         let machineUrl = null, nameplateUrl = null;
         if(machineFile || nameplateFile){
@@ -3016,7 +3023,7 @@
           location: document.getElementById('as-add-location').value.trim(),
           barcode: document.getElementById('as-add-barcode').value.trim() || null,
           machine_name: machine,
-          model_no: document.getElementById('as-add-model').value.trim(),
+          model_no: modelNo,
           serial_no: serial,
           year_of_installation: yearVal ? parseInt(yearVal) : null,
           date_of_last_service: document.getElementById('as-add-lastservice').value || null,
@@ -3030,14 +3037,16 @@
         document.getElementById('as-add-barcode').value = '';
         document.getElementById('as-add-machine').value = '';
         document.getElementById('as-add-model').value = '';
-        document.getElementById('as-add-serial').value = '';
+        document.getElementById('as-add-serial').value = 'NA';
         document.getElementById('as-add-year').value = '';
         document.getElementById('as-add-lastservice').value = '';
         clearPhotoField('as-add-photo-machine');
         clearPhotoField('as-add-photo-nameplate');
       }catch(e){
         if(/23505|duplicate key|\(409\)/i.test(String(e.message||''))){
-          const dupMsg = `An asset with serial number "${serial}" already exists. Duplicate assets are not allowed, so nothing was saved.`;
+          const dupMsg = isNaSerial(serial)
+            ? 'The database still blocks repeated serial numbers, so this asset was not saved. Ask the admin to run asset_duplicate_rule.sql in Supabase.'
+            : `An asset with Model No "${modelNo||'(blank)'}" and Serial No "${serial}" already exists. Duplicate assets are not allowed, so nothing was saved.`;
           msg.innerHTML = `<div class="pst-msg pst-msg-err">${esc(dupMsg)}</div>`;
           alert(dupMsg);
         }else{
