@@ -124,6 +124,14 @@
   .pst-bd-head{display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; font-size:13px;}
   .db-freq-row{cursor:pointer;} .db-freq-row:hover td{background:var(--accent-soft) !important;}
   @media (max-width: 640px){ .pst-modal{padding:8px;} .pst-modal-panel{padding:14px; max-height:92vh;} }
+  .pst-sheet .pst-modal-panel{background:rgba(255,255,255,0.97); width:min(640px,100%);}
+  .pst-sheet-actions{position:sticky; bottom:-22px; z-index:2; display:flex; gap:8px; margin:16px -22px -22px; padding:12px 22px calc(12px + env(safe-area-inset-bottom, 0px)); background:rgba(255,255,255,0.98); border-top:1px solid var(--line);}
+  .pst-sheet-actions .pst-btn{flex:1; width:auto;}
+  @media (max-width: 640px){
+    .pst-modal.pst-sheet{align-items:flex-end; padding:0;}
+    .pst-sheet .pst-modal-panel{width:100%; max-height:92vh; border-radius:16px 16px 0 0; padding:16px 14px;}
+    .pst-sheet-actions{bottom:-16px; margin:16px -14px -16px; padding:12px 14px calc(12px + env(safe-area-inset-bottom, 0px));}
+  }
   .pst-kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px;}
   .pst-kpi{border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:var(--radius); padding:12px 14px; background:#fff;}
   .pst-kpi.green{border-left-color:var(--green);} .pst-kpi.gold{border-left-color:var(--gold);} .pst-kpi.amber{border-left-color:var(--amber);} .pst-kpi.red{border-left-color:var(--red);}
@@ -1710,7 +1718,7 @@
         <td style="max-width:180px; white-space:pre-wrap;">${esc(r.remarks||'—')}</td>
         <td>${photoThumb(r.nameplate_photo_url)}</td>
         <td>${photoThumb(r.history_card_photo_url)}</td>
-        <td><button class="pst-icon-btn ov-store-jump" title="Open in Store Update" data-id="${r.id}">📦</button></td>
+        <td>${(canStoreUpdate() && statusEq(r.approval_status,'Approved')) ? `<button class="pst-btn pst-btn-ghost pst-btn-sm ov-store-jump" style="padding:4px 10px; font-size:12px; white-space:nowrap;" title="Update delivery &amp; installation" data-id="${r.id}">📦 Update</button>` : ''}</td>
         ${showPdfCol ? `<td>${statusEq(r.approval_status,'Approved') ? `<button class="pst-icon-btn ov-pdf" title="Generate Request PDF" data-id="${r.id}">📄</button>` : ''}</td>` : ''}
         ${session.role==='admin' ? `<td><button class="pst-icon-btn ov-delete" title="Delete record" data-id="${r.id}">🗑</button></td>` : ''}
       </tr>`).join('');
@@ -2061,6 +2069,7 @@
     downloadPhoto(lbDownload.dataset.url, lbDownload.dataset.filename);
   });
   let ovSort = {key:'date', dir:-1};
+  let ovRefresh = null; // set by wireOverview so dialogs can reload the visible page after saving
   let ovPage = 1;
   let ovPageSize = 25;
   function priorityRank(p){
@@ -2163,7 +2172,7 @@
         else pageLabelEl.textContent=`Page ${ovPage} of ${totalPages} (${from+1}–${Math.min(to+1,total)} of ${total})`;
         prevBtn.disabled=ovPage<=1 || ovPageSize==='all';
         nextBtn.disabled=ovPage>=totalPages || ovPageSize==='all';
-        tbody.querySelectorAll('.ov-store-jump').forEach(btn=>btn.addEventListener('click',(e)=>{e.stopPropagation(); const r=requests.find(x=>x.id===btn.dataset.id); if(r) openInStoreUpdate(r);}));
+        tbody.querySelectorAll('.ov-store-jump').forEach(btn=>btn.addEventListener('click',(e)=>{e.stopPropagation(); const r=requests.find(x=>x.id===btn.dataset.id); if(r) openStoreDialog(r);}));
         tbody.querySelectorAll('.ov-pdf').forEach(btn=>btn.addEventListener('click',(e)=>{e.stopPropagation(); const r=requests.find(x=>x.id===btn.dataset.id); if(r) generateRequestPdf(r,btn);}));
         tbody.querySelectorAll('.ov-copy-serial').forEach(el=>el.addEventListener('click',()=>copyToClipboard(el.dataset.copy,el)));
         if(session.role==='admin') tbody.querySelectorAll('.ov-delete').forEach(btn=>btn.addEventListener('click',async(e)=>{
@@ -2195,6 +2204,7 @@
     document.querySelectorAll('#ov-thead .ov-sortable').forEach(th=>th.addEventListener('click',()=>{
       const key=th.dataset.sort; if(ovSort.key===key) ovSort.dir*=-1; else {ovSort.key=key;ovSort.dir=1;} ovPage=1; apply();
     }));
+    ovRefresh = apply;
     apply();
   }
 
@@ -3498,6 +3508,101 @@
     }catch(e){
       bodyEl.innerHTML = `<div class="pst-msg pst-msg-err">Could not load machine details: ${esc(e.message)}</div>`;
     }
+  }
+
+  // ---------- STORE UPDATE DIALOG (opened from the Overview table) ----------
+  function canStoreUpdate(){ return !!session && tabsForSession().some(t=>t[0]==='store'); }
+  function storeDialogEsc(e){ if(e.key==='Escape') closeStoreDialog(); }
+  function closeStoreDialog(force){
+    const ov = document.getElementById('pst-store-dialog');
+    if(!ov) return;
+    if(!force && ov.dataset.dirty==='1' && !confirm('Discard your unsaved changes?')) return;
+    ov.remove();
+    document.body.style.overflow = '';
+    document.removeEventListener('keydown', storeDialogEsc);
+  }
+  function openStoreDialog(r){
+    if(!r) return;
+    if(!canStoreUpdate()){ alert('You do not have access to Store Update.'); return; }
+    if(!statusEq(r.approval_status,'Approved')){ alert('This request is not approved yet, so it cannot be updated by the store team.'); return; }
+    closeStoreDialog(true);
+    const ov = document.createElement('div');
+    ov.id = 'pst-store-dialog';
+    ov.className = 'pst-modal pst-sheet';
+    ov.setAttribute('role','dialog');
+    ov.setAttribute('aria-modal','true');
+    const opt = (list, cur)=> list.map(x=>`<option ${statusEq(cur,x)?'selected':''}>${x}</option>`).join('');
+    ov.innerHTML = `
+      <div class="pst-modal-panel">
+        <button class="pst-modal-close" id="sd-close" aria-label="Close">✕</button>
+        <p class="pst-modal-title" style="font-size:19px;">Store Update</p>
+        <p class="pst-modal-sub"><b style="color:var(--ink);">${esc(r.parts)} × ${esc(r.quantity)}</b> · <span class="pst-mono">${esc(reqSerial(r))}</span><br>
+          ${esc(r.site_project)} · ${esc(r.machine)} ${esc(r.make||'')} ${esc(r.model||'')}<br>
+          Req. by ${esc(r.requested_by)} on ${esc(fmtDate(r.request_date))}${r.pr_no ? ' · PR ' + esc(r.pr_no) : ''}</p>
+        <div class="pst-grid">
+          <div class="pst-field"><label>Delivery Status</label>
+            <select id="sd-delivery">${opt(['Pending','Dispatched','Delivered','Returned','Cancelled'], r.delivery_status)}</select></div>
+          <div class="pst-field"><label>DO No.</label><input type="text" id="sd-do" value="${esc(r.do_no||'')}"></div>
+          <div class="pst-field"><label>Delivery Date</label><input type="date" id="sd-date" value="${esc(r.delivery_date||'')}"></div>
+          <div class="pst-field"><label>Received Person</label><input type="text" id="sd-received" value="${esc(r.received_person||'')}" placeholder="Who received the delivery"></div>
+          <div class="pst-field"><label>Installation Status</label>
+            <select id="sd-install">${opt(['Pending','Installed','Not Required'], r.installation_status)}</select></div>
+          <div class="pst-field full"><label>Remarks</label><textarea id="sd-remarks">${esc(r.remarks||'')}</textarea></div>
+        </div>
+        <div id="sd-msg"></div>
+        <div class="pst-sheet-actions">
+          <button class="pst-btn pst-btn-primary" id="sd-save">Save Update</button>
+          <button class="pst-btn pst-btn-ghost" id="sd-cancel" type="button">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    document.body.style.overflow = 'hidden'; // keep the page behind from scrolling
+    document.addEventListener('keydown', storeDialogEsc);
+    ov.addEventListener('input', ()=>{ ov.dataset.dirty = '1'; });
+    ov.addEventListener('change', ()=>{ ov.dataset.dirty = '1'; });
+    ov.addEventListener('click', e=>{ if(e.target===ov) closeStoreDialog(); });
+    ov.querySelector('#sd-close').addEventListener('click', ()=>closeStoreDialog());
+    ov.querySelector('#sd-cancel').addEventListener('click', ()=>closeStoreDialog());
+
+    const msgEl = ov.querySelector('#sd-msg');
+    const saveBtn = ov.querySelector('#sd-save');
+    saveBtn.addEventListener('click', async ()=>{
+      const payload = {
+        delivery_status: ov.querySelector('#sd-delivery').value,
+        do_no: ov.querySelector('#sd-do').value.trim(),
+        delivery_date: ov.querySelector('#sd-date').value || null,
+        received_person: ov.querySelector('#sd-received').value.trim(),
+        installation_status: ov.querySelector('#sd-install').value,
+        remarks: ov.querySelector('#sd-remarks').value.trim()
+      };
+      if(payload.installation_status==='Installed' && !payload.delivery_date){
+        msgEl.innerHTML = '<div class="pst-msg pst-msg-err">Delivery Date is required before marking Installation as Installed. Nothing was saved.</div>';
+        ov.querySelector('#sd-date').focus();
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      msgEl.innerHTML = '';
+      try{
+        const res = await sb(PARTS_TABLE+'?id=eq.'+r.id, {method:'PATCH', body:payload});
+        if(!res || !res.length) throw new Error('Nothing was updated. You may not have permission to update this request.');
+        Object.assign(r, payload);
+        ladderLoadedAt = 0;
+        refreshLadderCounts(true).then(renderLadder);
+        closeStoreDialog(true);
+        if(ovRefresh){
+          // reload the visible Overview page, keeping the table scroll position
+          const sc = document.querySelector('.pst-table-scroll');
+          const top = sc ? sc.scrollTop : 0;
+          await ovRefresh();
+          if(sc) sc.scrollTop = top;
+        }
+      }catch(e){
+        msgEl.innerHTML = `<div class="pst-msg pst-msg-err">${esc(e.message)}</div>`;
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Update';
+      }
+    });
   }
 
   // ---------- init ----------
